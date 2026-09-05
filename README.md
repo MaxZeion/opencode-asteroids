@@ -38,10 +38,16 @@ Luego visita `http://localhost:3000`.
 | Mediano   | 50     |
 | Pequeño   | 100    |
 
+| Enemigo | Puntos |
+| ------- | ------ |
+| OVNI    | 200    |
+
 ## Características
 
 - 3 vidas con invencibilidad temporal al reaparecer (parpadeo)
 - Asteroides se parten en fragmentos más pequeños al ser destruidos
 - Partículas de explosión al destruir asteroides
-- Power-up de velocidad (drop de asteroides, ícono ⚡) que duplica la propulsión por 5s
-- Estrella fugaz: asteroide dorado con estela, muy rápido, que desaparece en ~8s (150 pts, se parte como los demás)
+- **OVNI enemigo** que cruza la pantalla cada 8–14 s, dispara contra la nave y se destruye con un solo impacto (200 pts)
+- **Power-up de velocidad** (drop de asteroides, ícono ⚡) que duplica la propulsión por 5 s
+- **Power-up de escudo** (drop de asteroides, ícono cian): al recogerlo aparece una burbuja alrededor de la nave con 3 cargas. Cada impacto (proyectil del OVNI **o** asteroide) consume una carga y destruye el proyectil/asteroide. Sin cargas, el escudo desaparece
+- Estrella fugaz: asteroide dorado con estela, muy rápido, que desaparece en ~8 s (150 pts, se parte como los demás)
