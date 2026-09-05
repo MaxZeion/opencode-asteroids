@@ -67,6 +67,10 @@ const POWERUP_CHANCE        = 0.15;   // probabilidad de drop por asteroide dest
 const POWERUP_TTL           = 10;     // segundos que vive el drop en pantalla
 const SPEED_BOOST_DURATION  = 5;      // segundos que dura el efecto (2x THRUST)
 
+// ── Habilidad: triple shot (activada por el jugador) ─────────────────────────
+const TRIPLE_SHOT_DURATION  = 5;      // segundos activo disparando 3 balas en abanico
+const TRIPLE_SHOT_COOLDOWN  = 20;     // segundos de recarga entre activaciones
+
 // ── Estrella fugaz ───────────────────────────────────────────────────────────
 const STAR_CHANCE  = 0.6;    // probabilidad de spawn por nivel iniciado
 const STAR_SPEED   = 300;    // px/s (vs 32–85 de los normales)
@@ -288,6 +292,8 @@ class Ship {
     this.shootCooldown = 0;
     this.dead          = false;
     this.speedBoost    = 0;   // segundos restantes de propulsión x2
+    this.tripleShot    = 0;   // segundos restantes con triple disparo activo
+    this.tripleShotCd  = 0;   // segundos restantes de recarga antes de poder reactivar
   }
 
   update(dt) {
@@ -295,6 +301,8 @@ class Ship {
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
     if (this.speedBoost    > 0) this.speedBoost    -= dt;
+    if (this.tripleShot    > 0) this.tripleShot    -= dt;
+    if (this.tripleShotCd  > 0) this.tripleShotCd  -= dt;
 
     const ROT    = 3.5;   // rad/s
     const THRUST = this.speedBoost > 0 ? 520 : 260;  // px/s² (x2 durante el boost)
@@ -321,6 +329,15 @@ class Ship {
     const NOSE = 21;
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
+    if (this.tripleShot > 0) {
+      // 3 balas desde el morro, en abanico de ±0.10 rad (~5.7°)
+      const SPREAD = 0.10;
+      return [
+        new Bullet(ox, oy, this.angle - SPREAD),
+        new Bullet(ox, oy, this.angle),
+        new Bullet(ox, oy, this.angle + SPREAD),
+      ];
+    }
     return [new Bullet(ox, oy, this.angle)];
   }
 
@@ -332,8 +349,10 @@ class Ship {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
-    // Dorada mientras el boost de velocidad esté activo
-    ctx.strokeStyle = this.speedBoost > 0 ? '#ffc24b' : '#fff';
+    // Cian mientras el triple shot esté activo, dorada si solo hay boost de velocidad
+    ctx.strokeStyle = this.tripleShot > 0 ? '#7cdcff'
+                    : this.speedBoost > 0 ? '#ffc24b'
+                    : '#fff';
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
 
@@ -541,6 +560,12 @@ function update(dt) {
     bullets.push(...ship.tryShoot());
   }
 
+  // Activar triple shot (si el cooldown terminó y la nave está viva)
+  if (pressed('KeyZ') && ship.tripleShotCd <= 0 && !ship.dead) {
+    ship.tripleShot   = TRIPLE_SHOT_DURATION;
+    ship.tripleShotCd = TRIPLE_SHOT_COOLDOWN;
+  }
+
   ship.update(dt);
   bullets.forEach(b => b.update(dt));
   asteroids.forEach(a => a.update(dt));
@@ -625,6 +650,15 @@ function drawHUD() {
   if (ship.speedBoost > 0) {
     ctx.fillStyle = '#ffc24b';
     ctx.fillText(`⚡ x2  ${ship.speedBoost.toFixed(1)}s`, 14, 48);
+  }
+
+  // Indicador de triple shot: activo (verde fuerte) o en recarga (verde atenuado)
+  if (ship.tripleShot > 0) {
+    ctx.fillStyle = '#7cff8a';
+    ctx.fillText(`Z — TRIPLE  ${ship.tripleShot.toFixed(1)}s`, 14, 70);
+  } else if (ship.tripleShotCd > 0) {
+    ctx.fillStyle = 'rgba(124, 255, 138, 0.55)';
+    ctx.fillText(`Z — RECARGA  ${ship.tripleShotCd.toFixed(1)}s`, 14, 70);
   }
 
   ctx.textAlign = 'center';
