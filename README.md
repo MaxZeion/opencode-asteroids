@@ -4,12 +4,13 @@ Clon del clásico arcade **Asteroids** implementado en canvas HTML5 puro, sin de
 
 ## Descripción
 
-Nave espacial en un campo de asteroides con envolvimiento de bordes (el espacio es toroidal). Destruye asteroides para sumar puntos: los grandes se parten en medianos, los medianos en pequeños. Incluye power-ups especiales y tipos de asteroides únicos como la estrella fugaz.
+Nave espacial en un campo de asteroides con envolvimiento de bordes (el espacio es toroidal). Destruye asteroides para sumar puntos: los grandes se parten en medianos, los medianos en pequeños. Incluye power-ups especiales, tipos de asteroides únicos como la estrella fugaz, enemigo OVNI, skins personalizables y habilidad de triple disparo.
 
 ## Tecnologías
 
 - **HTML5 Canvas** — renderizado 2D
 - **JavaScript (ES6+)** — lógica del juego en un solo archivo `game.js`
+- **localStorage** — persistencia del skin elegido
 - Sin frameworks, sin bundler, sin dependencias
 
 ## Cómo correr
@@ -30,6 +31,7 @@ Luego visita `http://localhost:3000`.
 | `↑`       | Propulsar  |
 | `Espacio` | Disparar   |
 | `Z`       | Triple shot (5 s, recarga 20 s) |
+| `S`       | Cambiar skin de la nave          |
 
 ## Puntuación
 
@@ -53,3 +55,4 @@ Luego visita `http://localhost:3000`.
 - **Power-up de escudo** (drop de asteroides, ícono cian): al recogerlo aparece una burbuja alrededor de la nave con 3 cargas. Cada impacto (proyectil del OVNI **o** asteroide) consume una carga y destruye el proyectil/asteroide. Sin cargas, el escudo desaparece
 - **Habilidad de triple shot**: pulsa `Z` para disparar 3 balas en abanico durante 5 s (cooldown 20 s; la nave se tinta de cian mientras está activa)
 - Estrella fugaz: asteroide dorado con estela, muy rápido, que desaparece en ~8s (150 pts, se parte como los demás)
+- **Skins personalizables**: 5 diseños de nave (Clásica, Dardo, Delta, Flecha, Pixel). Pulsa `S` para ciclar; la elección persiste en `localStorage` y se muestra un toast con el nombre al cambiarla
