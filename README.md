@@ -29,6 +29,7 @@ Luego visita `http://localhost:3000`.
 | `←` `→`   | Rotar nave |
 | `↑`       | Propulsar  |
 | `Espacio` | Disparar   |
+| `Z`       | Triple shot (5 s, recarga 20 s) |
 
 ## Puntuación
 
@@ -43,5 +44,6 @@ Luego visita `http://localhost:3000`.
 - 3 vidas con invencibilidad temporal al reaparecer (parpadeo)
 - Asteroides se parten en fragmentos más pequeños al ser destruidos
 - Partículas de explosión al destruir asteroides
-- Power-up de velocidad (drop de asteroides, ícono ⚡) que duplica la propulsión por 5s
+- Power-up de velocidad (drop de asteroides, ícono ⚡) que duplica la propulsión por 5 s
+- Habilidad de triple shot: pulsa `Z` para disparar 3 balas en abanico durante 5 s (cooldown 20 s; la nave se tinta de cian mientras está activa)
 - Estrella fugaz: asteroide dorado con estela, muy rápido, que desaparece en ~8s (150 pts, se parte como los demás)
