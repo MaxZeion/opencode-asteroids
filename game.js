@@ -5,11 +5,78 @@ const ctx = canvas.getContext('2d');
 const W = 800;
 const H = 600;
 
+// ── Audio (WebAudio sintetizado, sin archivos externos) ─────────────────────────
+const audio = {
+  ctx: null,
+  master: null,
+  enabled: true,
+  init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0.3;
+    this.master.connect(this.ctx.destination);
+  },
+  beep({ freq = 440, type = 'square', dur = 0.1, vol = 1, slide = 0 } = {}) {
+    if (!this.enabled || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(1, freq + slide), t + dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + dur + 0.01);
+  },
+  noise({ dur = 0.2, vol = 0.4, lp = 1000 } = {}) {
+    if (!this.enabled || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const buf = this.ctx.createBuffer(1, Math.ceil(this.ctx.sampleRate * dur), this.ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    const s = this.ctx.createBufferSource();
+    s.buffer = buf;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = lp;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f).connect(g).connect(this.master);
+    s.start(t);
+    s.stop(t + dur + 0.01);
+  },
+};
+
+const sfx = {
+  shoot()       { audio.beep({ freq: 880,  type: 'square',   dur: 0.06, vol: 0.15 }); },
+  shootTriple() { audio.beep({ freq: 1100, type: 'square',   dur: 0.05, vol: 0.18, slide: 400 }); },
+  enemyShoot()  { audio.beep({ freq: 220,  type: 'sawtooth', dur: 0.12, vol: 0.18, slide: -80 }); },
+  hit(size)     { audio.beep({ freq: 220 - size * 40, type: 'square', dur: 0.08, vol: 0.2 }); },
+  explode(s)    { audio.noise({ dur: 0.18 + s * 0.05, vol: 0.35, lp: 700 - s * 120 }); },
+  ufoDie()      { audio.noise({ dur: 0.4,  vol: 0.4,  lp: 800 }); },
+  powerup()     { audio.beep({ freq: 600,  type: 'triangle', dur: 0.15, vol: 0.2, slide: 800 }); },
+  shield()      { audio.beep({ freq: 800,  type: 'sine',     dur: 0.25, vol: 0.2, slide: -200 }); },
+  shieldBlock() { audio.beep({ freq: 400,  type: 'square',   dur: 0.1,  vol: 0.2 }); },
+  death()       { audio.noise({ dur: 0.7,  vol: 0.5,  lp: 300 }); },
+  respawn()     { audio.beep({ freq: 300,  type: 'sine',     dur: 0.2,  vol: 0.2, slide: 600 }); },
+  levelUp()     { audio.beep({ freq: 440, type: 'square', dur: 0.12, vol: 0.2, slide: 600 });
+                  setTimeout(() => audio.beep({ freq: 660, type: 'square', dur: 0.15, vol: 0.2, slide: 800 }), 100); },
+  skin()        { audio.beep({ freq: 1200, type: 'sine',     dur: 0.08, vol: 0.15, slide: -400 }); },
+  tripleOn()    { audio.beep({ freq: 500,  type: 'triangle', dur: 0.2,  vol: 0.2, slide: 800 }); },
+  gameOver()    { audio.beep({ freq: 300,  type: 'sawtooth', dur: 0.4,  vol: 0.3, slide: -200 }); },
+};
+
 // ── Input ─────────────────────────────────────────────────────────────────────
 const keys = {};
 const justPressed = {};
 
 window.addEventListener('keydown', e => {
+  audio.init();
   justPressed[e.code] = !keys[e.code];
   keys[e.code] = true;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code))
@@ -364,7 +431,7 @@ function setSkin(i) {
   skinToast = 1.2;
 }
 
-function cycleSkin() { setSkin(currentSkinIndex + 1); }
+function cycleSkin() { setSkin(currentSkinIndex + 1); sfx.skin(); }
 
 // ── OVNI enemigo ─────────────────────────────────────────────────────────────
 class Ufo {
@@ -771,10 +838,12 @@ function explode(x, y, count = 8, color) {
 
 function killShip() {
   explode(ship.x, ship.y, 14);
+  sfx.death();
   ship.dead = true;
   lives--;
   if (lives <= 0) {
     state = 'gameover';
+    sfx.gameOver();
   } else {
     state     = 'dead';
     deadTimer = 2;
@@ -808,19 +877,21 @@ function update(dt) {
     ufos.forEach(u => u.update(dt));
     enemyBullets.forEach(b => b.update(dt));
     enemyBullets = enemyBullets.filter(b => !b.dead);
-    if (deadTimer <= 0) { state = 'playing'; ship.reset(); }
+    if (deadTimer <= 0) { state = 'playing'; ship.reset(); sfx.respawn(); }
     return;
   }
 
   // Disparar
   if (pressed('Space')) {
     bullets.push(...ship.tryShoot());
+    sfx[ship.tripleShot > 0 ? 'shootTriple' : 'shoot']();
   }
 
   // Activar triple shot (si el cooldown terminó y la nave está viva)
   if (pressed('KeyZ') && ship.tripleShotCd <= 0 && !ship.dead) {
     ship.tripleShot   = TRIPLE_SHOT_DURATION;
     ship.tripleShotCd = TRIPLE_SHOT_COOLDOWN;
+    sfx.tripleOn();
   }
 
   // Spawn del OVNI
@@ -850,7 +921,9 @@ function update(dt) {
         b.dead = true;
         a.dead = true;
         score += a.star ? STAR_POINTS : POINTS[a.size];
+        sfx.hit(a.size);
         explode(a.x, a.y, a.size * 5);
+        sfx.explode(a.size);
         newAsteroids.push(...a.split());
         const drop = Math.random();
         if (drop < POWERUP_CHANCE)
@@ -862,7 +935,7 @@ function update(dt) {
   }
   // Estrellas fugaces que expiraron por tiempo: destello al desaparecer
   for (const a of asteroids)
-    if (a.expired) explode(a.x, a.y, 6);
+    if (a.expired) { explode(a.x, a.y, 6); sfx.explode(2); }
 
   asteroids = asteroids.filter(a => !a.dead).concat(newAsteroids);
   bullets   = bullets.filter(b => !b.dead);
@@ -875,6 +948,7 @@ function update(dt) {
         u.dead = true;
         score += UFO_POINTS;
         explode(u.x, u.y, 12);
+        sfx.ufoDie();
       }
     }
   }
@@ -884,7 +958,7 @@ function update(dt) {
   for (const u of ufos) {
     if (!u.dead && !ship.dead) {
       const eb = u.tryShoot(ship.x, ship.y);
-      if (eb) enemyBullets.push(eb);
+      if (eb) { enemyBullets.push(eb); sfx.enemyShoot(); }
     }
   }
 
@@ -896,9 +970,11 @@ function update(dt) {
       if (p instanceof ShieldPowerUp) {
         ship.shieldCharges = SHIELD_CHARGES;
         explode(p.x, p.y, 8, '90,215,255');
+        sfx.shield();
       } else {
         ship.speedBoost = SPEED_BOOST_DURATION;
         explode(p.x, p.y, 6);
+        sfx.powerup();
       }
     }
   }
@@ -911,6 +987,7 @@ function update(dt) {
       if (!eb.dead && dist(ship, eb) < shieldR + eb.radius) {
         eb.dead = true;
         ship.shieldCharges--;
+        sfx.shieldBlock();
         explode(ship.x, ship.y, 8, '90,215,255');
         if (ship.shieldCharges === 0) explode(ship.x, ship.y, 14, '90,215,255');
       }
@@ -919,6 +996,7 @@ function update(dt) {
       if (!a.dead && dist(ship, a) < shieldR + a.radius * 0.82) {
         a.dead = true;
         ship.shieldCharges--;
+        sfx.shieldBlock();
         explode(a.x, a.y, a.size * 5);
         if (ship.shieldCharges === 0) explode(ship.x, ship.y, 14, '90,215,255');
       }
@@ -948,7 +1026,7 @@ function update(dt) {
   }
 
   // Nivel completado
-  if (asteroids.length === 0) nextLevel();
+  if (asteroids.length === 0) { nextLevel(); sfx.levelUp(); }
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
