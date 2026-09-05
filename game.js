@@ -67,16 +67,28 @@ const POWERUP_CHANCE        = 0.15;   // probabilidad de drop por asteroide dest
 const POWERUP_TTL           = 10;     // segundos que vive el drop en pantalla
 const SPEED_BOOST_DURATION  = 5;      // segundos que dura el efecto (2x THRUST)
 
+// ── Estrella fugaz ───────────────────────────────────────────────────────────
+const STAR_CHANCE  = 0.6;    // probabilidad de spawn por nivel iniciado
+const STAR_SPEED   = 300;    // px/s (vs 32–85 de los normales)
+const STAR_TTL     = 8;      // segundos de vida; se funde en los últimos 2
+const STAR_POINTS  = 150;    // puntos por fragmento
+
 class Asteroid {
-  constructor(x, y, size = 3) {
+  constructor(x, y, size = 3, star = false) {
     this.x    = x;
     this.y    = y;
     this.size = size;
     this.radius = RADII[size];
     this.dead = false;
+    this.expired = false;        // se fue por TTL (para distinguir al filtrar)
+
+    // Estado "estrella fugaz": rápida, temporal, hereda al partirse
+    this.star = star;
+    this.ttl  = star ? STAR_TTL : null;
 
     const angle = rand(0, Math.PI * 2);
-    const speed = SPEEDS[size] + rand(-15, 15);
+    const base  = star ? STAR_SPEED : SPEEDS[size];
+    const speed = base + (star ? rand(-30, 30) : rand(-15, 15));
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
     this.rotSpeed = rand(-1.2, 1.2);
@@ -92,21 +104,65 @@ class Asteroid {
     }
   }
 
+  // Estrella fugaz que cruza la pantalla: entra desde un borde al azar,
+  // tamaño grande (pero a mitad de radio visual) y dirección aleatoria.
+  static star() {
+    const edge = randInt(0, 3);
+    let x, y;
+    const HALF_R = RADII[3] / 2;   // 25 — radio visual a la mitad
+    switch (edge) {
+      case 0: x = rand(0, W); y = -HALF_R; break;   // arriba
+      case 1: x = W + HALF_R; y = rand(0, H); break; // derecha
+      case 2: x = rand(0, W); y = H + HALF_R; break; // abajo
+      case 3: x = -HALF_R; y = rand(0, H); break;   // izquierda
+    }
+    // Ajuste para que el wrap la ponga al otro lado en el primer frame
+    x = wrap(x, W);
+    y = wrap(y, H);
+    const a = new Asteroid(x, y, 3, true);
+    a.radius = HALF_R;   // mitad de tamaño; sigue partiendo como un grande
+    // Fuerza dirección hacia el interior de la pantalla
+    const dx = W / 2 - a.x;
+    const dy = H / 2 - a.y;
+    const ang = Math.atan2(dy, dx) + rand(-0.6, 0.6);
+    a.vx = Math.cos(ang) * STAR_SPEED;
+    a.vy = Math.sin(ang) * STAR_SPEED;
+    return a;
+  }
+
   update(dt) {
     this.x   = wrap(this.x + this.vx * dt, W);
     this.y   = wrap(this.y + this.vy * dt, H);
     this.rot += this.rotSpeed * dt;
+
+    if (this.star) {
+      this.ttl -= dt;
+      if (this.ttl <= 0) {
+        this.dead    = true;
+        this.expired = true;
+      }
+    }
   }
 
   split() {
     if (this.size <= 1) return [];
-    return [
-      new Asteroid(this.x, this.y, this.size - 1),
-      new Asteroid(this.x, this.y, this.size - 1),
+    // Las estrellas fugaces heredan su estado a los fragmentos
+    const children = [
+      new Asteroid(this.x, this.y, this.size - 1, this.star),
+      new Asteroid(this.x, this.y, this.size - 1, this.star),
     ];
+    // Si el padre era una estrella, los hijos conservan la mitad de su radio
+    if (this.star) children.forEach(c => c.radius = this.radius / 2);
+    return children;
   }
 
   draw() {
+    if (this.star) { this.drawStar(); return; }
+    this.drawRock();
+  }
+
+  // Asteroide normal: polígono irregular blanco
+  drawRock() {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.rot);
@@ -120,6 +176,99 @@ class Asteroid {
     ctx.closePath();
     ctx.stroke();
     ctx.restore();
+  }
+
+  // Estrella fugaz: pequeño sol con estela cónica, halo, rayos y fade-out
+  drawStar() {
+    const fade  = Math.max(0, Math.min(1, this.ttl / 2));   // 0..1
+    const speed = Math.hypot(this.vx, this.vy) || 1;
+    const ux    = this.vx / speed;
+    const uy    = this.vy / speed;                            // dirección del movimiento
+    const px    = -uy;   // perpendicular (rotación -90°)
+    const py    =  ux;
+
+    const r     = this.radius;
+    const tail  = r * 2.6;                                    // longitud de la punta
+    const halfW = r * 0.85;                                   // semiancho de la base
+
+    const tipX   = this.x - ux * tail;
+    const tipY   = this.y - uy * tail;
+    const baseLX = this.x - ux * 0.25 * r + px * halfW;
+    const baseLY = this.y - uy * 0.25 * r + py * halfW;
+    const baseRX = this.x - ux * 0.25 * r - px * halfW;
+    const baseRY = this.y - uy * 0.25 * r - py * halfW;
+
+    // 1) Estela cónica (degradado hacia el borde)
+    {
+      const g = ctx.createLinearGradient(this.x, this.y, tipX, tipY);
+      g.addColorStop(0, `rgba(255, 240, 190, ${0.85 * fade})`);
+      g.addColorStop(0.4, `rgba(255, 210, 120, ${0.35 * fade})`);
+      g.addColorStop(1, 'rgba(255, 180, 70, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(baseLX, baseLY);
+      ctx.lineTo(tipX, tipY);
+      ctx.lineTo(baseRX, baseRY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Línea central brillante (núcleo de la estela)
+      ctx.strokeStyle = `rgba(255, 250, 230, ${0.9 * fade})`;
+      ctx.lineWidth   = 3;
+      ctx.lineCap     = 'round';
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y);
+      ctx.lineTo(this.x - ux * r * 1.6, this.y - uy * r * 1.6);
+      ctx.stroke();
+    }
+
+    // 2) Halo exterior
+    {
+      const haloR = r * 1.9;
+      const g = ctx.createRadialGradient(this.x, this.y, r * 0.6,
+                                         this.x, this.y, haloR);
+      g.addColorStop(0, `rgba(255, 220, 120, ${0.35 * fade})`);
+      g.addColorStop(1, 'rgba(255, 220, 120, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, haloR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 3) Rayos (8 cortos radiantes, rotan con la pieza)
+    {
+      const rayLen = r * 0.55;
+      ctx.strokeStyle = `rgba(255, 210, 122, ${0.8 * fade})`;
+      ctx.lineWidth   = 1.5;
+      ctx.lineCap     = 'round';
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2 + this.rot;
+        ctx.beginPath();
+        ctx.moveTo(this.x + Math.cos(a) * (r * 0.95),
+                   this.y + Math.sin(a) * (r * 0.95));
+        ctx.lineTo(this.x + Math.cos(a) * (r + rayLen),
+                   this.y + Math.sin(a) * (r + rayLen));
+        ctx.stroke();
+      }
+    }
+
+    // 4) Núcleo del sol (gradiente radial, blanco-crema → amarillo → naranja)
+    {
+      const g = ctx.createRadialGradient(this.x, this.y, 0,
+                                         this.x, this.y, r);
+      g.addColorStop(0,    `rgba(255, 253, 235, ${fade})`);
+      g.addColorStop(0.45, `rgba(255, 226, 122, ${fade})`);
+      g.addColorStop(1,    `rgba(255, 179, 71,  ${fade})`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Anillo sutil en el borde
+      ctx.strokeStyle = `rgba(255, 200, 90, ${0.7 * fade})`;
+      ctx.lineWidth   = 1;
+      ctx.stroke();
+    }
   }
 }
 
@@ -320,6 +469,11 @@ function spawnAsteroids(count) {
   }
 }
 
+function maybeSpawnStar() {
+  if (Math.random() < STAR_CHANCE)
+    asteroids.push(Asteroid.star());
+}
+
 function initGame() {
   ship          = new Ship();
   bullets   = [];
@@ -331,6 +485,7 @@ function initGame() {
   level  = 1;
   state  = 'playing';
   spawnAsteroids(4);
+  maybeSpawnStar();
 }
 
 function nextLevel() {
@@ -340,6 +495,7 @@ function nextLevel() {
   powerups  = [];
   ship.reset();
   spawnAsteroids(3 + level);
+  maybeSpawnStar();
 }
 
 function explode(x, y, count = 8) {
@@ -400,7 +556,7 @@ function update(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += POINTS[a.size];
+        score += a.star ? STAR_POINTS : POINTS[a.size];
         explode(a.x, a.y, a.size * 5);
         newAsteroids.push(...a.split());
         if (Math.random() < POWERUP_CHANCE)
@@ -408,6 +564,10 @@ function update(dt) {
       }
     }
   }
+  // Estrellas fugaces que expiraron por tiempo: destello al desaparecer
+  for (const a of asteroids)
+    if (a.expired) explode(a.x, a.y, 6);
+
   asteroids = asteroids.filter(a => !a.dead).concat(newAsteroids);
   bullets   = bullets.filter(b => !b.dead);
 

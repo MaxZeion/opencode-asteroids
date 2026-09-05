@@ -44,3 +44,4 @@ Luego visita `http://localhost:3000`.
 - Asteroides se parten en fragmentos más pequeños al ser destruidos
 - Partículas de explosión al destruir asteroides
 - Power-up de velocidad (drop de asteroides, ícono ⚡) que duplica la propulsión por 5s
+- Estrella fugaz: asteroide dorado con estela, muy rápido, que desaparece en ~8s (150 pts, se parte como los demás)
