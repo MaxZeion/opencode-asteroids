@@ -25,30 +25,23 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
           persist-credentials: false
 
-      - name: Set up Node.js
-        # `mcode` requiere Node 22.19+ o 24-26.
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
       - name: Install MiniMax Code CLI
-        # Cada step `run:` abre un shell con su propio PATH; el directorio
-        # de binarios globales de npm NO siempre se hereda. Lo localizamos
-        # y lo propagamos explícitamente con $GITHUB_PATH.
+        # El installer oficial (curl|bash) es el método recomendado por
+        # el fabricante: descarga Node compatible, instala @minimax-ai/code
+        # y deja el binario en /home/runner/.minimax-code/bin/mcode.
+        # El problema: el installer añade la ruta a ~/.bashrc, que los
+        # steps `run:` siguientes NO cargan. Lo arreglamos propagando la
+        # ruta explícitamente con $GITHUB_PATH.
         run: |
-          npm install -g @minimax-ai/code
-          MCODE_BIN_DIR="$(npm bin -g)"
-          MCODE_BIN="$MCODE_BIN_DIR/mcode"
-          echo "MCODE_BIN_DIR=$MCODE_BIN_DIR"
-          echo "MCODE_BIN=$MCODE_BIN"
-          if [ ! -x "$MCODE_BIN" ]; then
-            echo "::error::mcode no se enlazó tras npm install (postinstall pudo fallar)"
-            ls -la "$MCODE_BIN_DIR" | head -20
-            echo "---"
-            echo "npm root -g:"; npm root -g
-            echo "ls del paquete:"; ls -la "$(npm root -g)/@minimax-ai/code" 2>&1 | head -20
+          curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash
+          MCODE_BIN="/home/runner/.minimax-code/bin/mcode"
+          if [ ! -e "$MCODE_BIN" ]; then
+            echo "::error::mcode no se encontró en $MCODE_BIN tras el install"
+            ls -la /home/runner/.minimax-code/bin/ 2>/dev/null || true
             exit 1
           fi
+          MCODE_BIN_DIR="$(dirname "$MCODE_BIN")"
+          echo "MCODE_BIN_DIR=$MCODE_BIN_DIR"
           echo "$MCODE_BIN_DIR" >> "$GITHUB_PATH"
           "$MCODE_BIN" --version
 
