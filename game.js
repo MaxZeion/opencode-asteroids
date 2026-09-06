@@ -69,6 +69,96 @@ const sfx = {
   skin()        { audio.beep({ freq: 1200, type: 'sine',     dur: 0.08, vol: 0.15, slide: -400 }); },
   tripleOn()    { audio.beep({ freq: 500,  type: 'triangle', dur: 0.2,  vol: 0.2, slide: 800 }); },
   gameOver()    { audio.beep({ freq: 300,  type: 'sawtooth', dur: 0.4,  vol: 0.3, slide: -200 }); },
+  hyperspace()  { audio.beep({ freq: 1400, type: 'sawtooth', dur: 0.18, vol: 0.18, slide: -1200 });
+                  audio.noise({ dur: 0.08, vol: 0.12, lp: 3000 }); },
+  pause()       { audio.beep({ freq: 440,  type: 'square',   dur: 0.06, vol: 0.15, slide: -120 }); },
+  resume()      { audio.beep({ freq: 440,  type: 'square',   dur: 0.06, vol: 0.15, slide:  120 }); },
+  newRecord()   { audio.beep({ freq: 523,  type: 'square',   dur: 0.10, vol: 0.18 });
+                  setTimeout(() => audio.beep({ freq: 659, type: 'square', dur: 0.10, vol: 0.18 }), 100);
+                  setTimeout(() => audio.beep({ freq: 784, type: 'square', dur: 0.10, vol: 0.18 }), 200);
+                  setTimeout(() => audio.beep({ freq: 1046,type: 'square',   dur: 0.20, vol: 0.20 }), 300); },
+};
+
+// ── Música chiptune sintetizada ───────────────────────────────────────────────
+// Patrón de 32 semicorcheas a 100 BPM (paso = 0.15s, compás = 4.8s).
+// Cada entrada es [lead Hz, bajo Hz]; 0 = silencio.
+const MUSIC = [
+  [293.66, 73.42], [   0,    0], [293.66,    0], [   0,    0],
+  [349.23,    0], [   0,    0], [293.66,    0], [   0,    0],
+  [440.00, 73.42], [   0,    0], [349.23,    0], [   0,    0],
+  [293.66,    0], [   0,    0], [261.63,    0], [   0,    0],
+  [293.66, 73.42], [   0,    0], [293.66,    0], [   0,    0],
+  [349.23,    0], [   0,    0], [293.66,    0], [   0,    0],
+  [392.00, 73.42], [   0,    0], [349.23,    0], [   0,    0],
+  [293.66,    0], [   0,    0], [466.16,    0], [   0,    0],
+];
+
+const MUSIC_STEP = 60 / 100 / 4; // 0.15s por semicorchea
+
+const music = {
+  gain: null,
+  interval: null,
+  stepIdx: 0,
+  nextTime: 0,
+
+  ensureBus() {
+    if (this.gain || !audio.ctx) return;
+    this.gain = audio.ctx.createGain();
+    this.gain.gain.value = 1;
+    this.gain.connect(audio.master);
+  },
+
+  start() {
+    if (this.interval) return;
+    this.ensureBus();
+    if (!audio.ctx) return;
+    this.stepIdx = 0;
+    this.nextTime = audio.ctx.currentTime + 0.15;
+    this.tick();
+    this.interval = setInterval(() => this.tick(), 25);
+  },
+
+  stop() {
+    if (this.interval) { clearInterval(this.interval); this.interval = null; }
+  },
+
+  tick() {
+    if (!audio.ctx || !audio.enabled) return;
+    while (this.nextTime < audio.ctx.currentTime + 0.1) {
+      this.scheduleStep(this.stepIdx, this.nextTime);
+      this.stepIdx = (this.stepIdx + 1) % MUSIC.length;
+      this.nextTime += MUSIC_STEP;
+    }
+  },
+
+  scheduleStep(idx, when) {
+    const [lead, bass] = MUSIC[idx];
+    if (lead > 0) {
+      const o = audio.ctx.createOscillator();
+      const f = audio.ctx.createBiquadFilter();
+      const g = audio.ctx.createGain();
+      f.type = 'lowpass';
+      f.frequency.value = 1500;
+      o.type = 'square';
+      o.frequency.value = lead;
+      g.gain.setValueAtTime(0, when);
+      g.gain.linearRampToValueAtTime(0.05, when + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + 0.13);
+      o.connect(f).connect(g).connect(this.gain);
+      o.start(when); o.stop(when + 0.14);
+    }
+    if (bass > 0) {
+      const o = audio.ctx.createOscillator();
+      const g = audio.ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.value = bass;
+      g.gain.setValueAtTime(0, when);
+      g.gain.linearRampToValueAtTime(0.06, when + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + 0.45);
+      o.connect(g).connect(this.gain);
+      o.start(when); o.stop(when + 0.46);
+    }
+  },
 };
 
 // ── Input ─────────────────────────────────────────────────────────────────────
@@ -95,6 +185,61 @@ const wrap  = (v, max) => ((v % max) + max) % max;
 const dist  = (a, b)   => Math.hypot(a.x - b.x, a.y - b.y);
 const rand  = (min, max) => min + Math.random() * (max - min);
 const randInt = (min, max) => Math.floor(rand(min, max + 1));
+
+// ── Fondo de estrellas (paralaje en 3 capas) ──────────────────────────────────
+// Lejana: muchas, pequeñas, lentas, tenues.   Media y cercana: menos, más rápidas.
+// Todas avanzan hacia abajo; cuando la nave acelera, la capa cercana se acelera
+// más, dando sensación de velocidad.
+const STAR_LAYERS = [
+  { count:  90, speed:  18, r: 0.7, b: 0.30, thrustMul: 1.0 },
+  { count:  55, speed:  48, r: 1.0, b: 0.55, thrustMul: 1.25 },
+  { count:  25, speed: 110, r: 1.4, b: 0.85, thrustMul: 1.55 },
+];
+
+let stars = [];
+
+function makeStars() {
+  stars = [];
+  for (const L of STAR_LAYERS) {
+    for (let i = 0; i < L.count; i++) {
+      stars.push({
+        x:  Math.random() * W,
+        y:  Math.random() * H,
+        vx: rand(-3, 3),
+        vy: L.speed + rand(-L.speed * 0.2, L.speed * 0.2),
+        r:  L.r,
+        b:  L.b,
+        tm: L.thrustMul,
+        tw: Math.random() * Math.PI * 2,
+        tws: rand(1.5, 4),
+      });
+    }
+  }
+}
+
+function updateStars(dt) {
+  const boost = (ship && !ship.dead && ship.thrusting) ? 1.4 : 1;
+  for (const s of stars) {
+    const m = boost > 1 ? s.tm : 1;
+    s.x = wrap(s.x + s.vx * dt, W);
+    s.y = wrap(s.y + s.vy * m * dt, H);
+  }
+}
+
+let _starsTime = 0;
+function drawStars() {
+  _starsTime += 1 / 60; // aproximación; el twinkle no necesita ser exacto
+  ctx.fillStyle = '#fff';
+  for (const s of stars) {
+    const tw = s.b * (0.7 + 0.3 * Math.sin(_starsTime * s.tws + s.tw));
+    if (tw < 0.05) continue;
+    ctx.globalAlpha = tw;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
 
 // ── Bullet ────────────────────────────────────────────────────────────────────
 class Bullet {
@@ -518,6 +663,7 @@ class Ship {
     this.tripleShotCd  = 0;   // segundos restantes de recarga antes de poder reactivar
     this.shieldCharges = 0;   // 0 = sin escudo; >0 = absorbe esa cantidad de impactos
     this.shieldPulse   = 0;   // para animación de la burbuja
+    this.hyperspaceCd  = 0;   // segundos restantes antes de poder hiperespaciar
   }
 
   update(dt) {
@@ -527,6 +673,7 @@ class Ship {
     if (this.speedBoost    > 0) this.speedBoost    -= dt;
     if (this.tripleShot    > 0) this.tripleShot    -= dt;
     if (this.tripleShotCd  > 0) this.tripleShotCd  -= dt;
+    if (this.hyperspaceCd  > 0) this.hyperspaceCd  -= dt;
     if (this.shieldCharges > 0) this.shieldPulse  += dt;
 
     const ROT    = 3.5;   // rad/s
@@ -777,13 +924,42 @@ class ShieldPowerUp {
   }
 }
 
+// ── Hiperespacio ───────────────────────────────────────────────────────────────
+const HYPERSPACE_COOLDOWN     = 4;     // segundos entre usos
+const HYPERSPACE_INVULNERABLE = 1.2;   // invencibilidad post-teleporte
+const HYPERSPACE_ARRIVAL_MARGIN = 18;  // margen mínimo desde el borde al aparecer
+
+// ── High-score: entrada de iniciales ──────────────────────────────────────────
+const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
 // ── Estado del juego ──────────────────────────────────────────────────────────
 let ship, bullets, asteroids, particles, powerups;
 let enemyBullets, ufos;
 let score, lives, level;
-let state;      // 'playing' | 'dead' | 'gameover'
+let state;       // 'help' | 'playing' | 'paused' | 'dead' | 'enterName' | 'gameover'
 let deadTimer;
 let ufoSpawnTimer;
+let bestScore, bestName;
+let nameChars, nameIndex;
+let newRecord;
+
+function loadBest() {
+  bestScore = 0;
+  bestName  = '---';
+  try {
+    const bs = parseInt(localStorage.getItem('asteroids.bestScore') || '0', 10);
+    const bn = localStorage.getItem('asteroids.bestName');
+    if (Number.isFinite(bs) && bs > 0) bestScore = bs;
+    if (typeof bn === 'string' && bn.length > 0) bestName = bn.slice(0, 3);
+  } catch (e) { /* localStorage puede no estar disponible */ }
+}
+
+function saveBest() {
+  try {
+    localStorage.setItem('asteroids.bestScore', String(bestScore));
+    localStorage.setItem('asteroids.bestName',  bestName);
+  } catch (e) { /* ignorar */ }
+}
 
 function spawnAsteroids(count) {
   const SAFE_DIST = 130;
@@ -813,10 +989,14 @@ function initGame() {
   score         = 0;
   lives         = 3;
   level         = 1;
-  state         = 'playing';
+  state         = 'help';
+  newRecord     = false;
   ufoSpawnTimer = rand(UFO_SPAWN_MIN, UFO_SPAWN_MAX);
+  loadBest();
+  makeStars();
   spawnAsteroids(4);
   maybeSpawnStar();
+  music.stop();
 }
 
 function nextLevel() {
@@ -842,21 +1022,116 @@ function killShip() {
   ship.dead = true;
   lives--;
   if (lives <= 0) {
-    state = 'gameover';
+    music.stop();
     sfx.gameOver();
+    if (score > bestScore) {
+      bestScore = score;
+      newRecord = true;
+      nameChars = ['A', 'A', 'A'];
+      nameIndex = 0;
+      state     = 'enterName';
+    } else {
+      newRecord = false;
+      state     = 'gameover';
+    }
   } else {
     state     = 'dead';
     deadTimer = 2;
   }
 }
 
-// ── Update ────────────────────────────────────────────────────────────────────
-function update(dt) {
-  if (skinToast > 0) skinToast = Math.max(0, skinToast - dt);
-  if (pressed('KeyS')) cycleSkin();
+function cycleNameChar(delta) {
+  const i   = NAME_CHARS.indexOf(nameChars[nameIndex]);
+  const n   = NAME_CHARS.length;
+  const nxt = ((i + delta) % n + n) % n;
+  nameChars[nameIndex] = NAME_CHARS[nxt];
+}
+
+function confirmName() {
+  bestName = nameChars.join('');
+  saveBest();
+  if (newRecord) sfx.newRecord();
+  state = 'gameover';
+}
+
+function tryHyperspace() {
+  if (ship.dead || ship.hyperspaceCd > 0) return false;
+  ship.x  = rand(HYPERSPACE_ARRIVAL_MARGIN, W - HYPERSPACE_ARRIVAL_MARGIN);
+  ship.y  = rand(HYPERSPACE_ARRIVAL_MARGIN, H - HYPERSPACE_ARRIVAL_MARGIN);
+  ship.vx = 0;
+  ship.vy = 0;
+  ship.invincible   = Math.max(ship.invincible, HYPERSPACE_INVULNERABLE);
+  ship.hyperspaceCd = HYPERSPACE_COOLDOWN;
+  sfx.hyperspace();
+  // Riesgo: si el destino coincide con un asteroide o un OVNI, la nave muere
+  for (const a of asteroids) {
+    if (!a.dead && dist(ship, a) < ship.radius + a.radius * 0.82) {
+      explode(ship.x, ship.y, 10, '180,220,255');
+      killShip();
+      return true;
+    }
+  }
+  for (const u of ufos) {
+    if (!u.dead && dist(ship, u) < ship.radius + u.radius) {
+      killShip();
+      return true;
+    }
+  }
+  // Destello de llegada
+  explode(ship.x, ship.y, 12, '180,220,255');
+  return true;
+}
+
+// ── updateSim: lógica de simulación (se llama con dt fijo por sub-step) ───────
+function updateSim(dt) {
+  // Mute funciona en cualquier estado
+  if (pressed('KeyM')) {
+    audio.enabled = !audio.enabled;
+    if (!audio.enabled)      music.stop();
+    else if (state === 'playing' && audio.ctx) music.start();
+  }
+
+  if (state === 'help') {
+    if (pressed('Enter') || pressed('Space')) {
+      state = 'playing';
+      if (audio.enabled && audio.ctx) music.start();
+    }
+    return;
+  }
+
+  if (state === 'paused') {
+    if (pressed('KeyP')) {
+      state = 'playing';
+      sfx.resume();
+      if (audio.enabled && audio.ctx) music.start();
+    }
+    if (pressed('KeyH')) { state = 'help'; music.stop(); }
+    return;
+  }
+
+  if ((state === 'playing' || state === 'dead') && pressed('KeyP')) {
+    state = 'paused';
+    sfx.pause();
+    music.stop();
+    return;
+  }
+  if ((state === 'playing' || state === 'dead') && pressed('KeyH')) {
+    state = 'help';
+    music.stop();
+    return;
+  }
+
+  if (state === 'enterName') {
+    if (pressed('ArrowUp')    || pressed('KeyQ')) cycleNameChar(+1);
+    if (pressed('ArrowDown')  || pressed('KeyZ')) cycleNameChar(-1);
+    if (pressed('ArrowRight') || pressed('KeyD')) nameIndex = (nameIndex + 1) % 3;
+    if (pressed('ArrowLeft')  || pressed('KeyA')) nameIndex = (nameIndex + 2) % 3;
+    if (pressed('Enter') || pressed('Space'))    confirmName();
+    return;
+  }
 
   if (state === 'gameover') {
-    if (pressed('Space')) initGame();
+    if (pressed('Space') || pressed('Enter')) initGame();
     particles.forEach(p => p.update(dt));
     particles = particles.filter(p => !p.dead);
     powerups.forEach(p => p.update(dt));
@@ -881,20 +1156,24 @@ function update(dt) {
     return;
   }
 
-  // Disparar
+  // state === 'playing'
+  if (pressed('KeyS')) cycleSkin();
+
   if (pressed('Space')) {
     bullets.push(...ship.tryShoot());
     sfx[ship.tripleShot > 0 ? 'shootTriple' : 'shoot']();
   }
 
-  // Activar triple shot (si el cooldown terminó y la nave está viva)
   if (pressed('KeyZ') && ship.tripleShotCd <= 0 && !ship.dead) {
     ship.tripleShot   = TRIPLE_SHOT_DURATION;
     ship.tripleShotCd = TRIPLE_SHOT_COOLDOWN;
     sfx.tripleOn();
   }
 
-  // Spawn del OVNI
+  if ((pressed('ShiftLeft') || pressed('ShiftRight')) && !ship.dead) {
+    tryHyperspace();
+  }
+
   ufoSpawnTimer -= dt;
   if (ufoSpawnTimer <= 0 && ufos.length === 0) {
     ufos.push(new Ufo());
@@ -907,6 +1186,7 @@ function update(dt) {
   ufos.forEach(u => u.update(dt));
   enemyBullets.forEach(b => b.update(dt));
   particles.forEach(p => p.update(dt));
+  updateStars(dt);
 
   bullets      = bullets.filter(b => !b.dead);
   enemyBullets = enemyBullets.filter(b => !b.dead);
@@ -933,7 +1213,6 @@ function update(dt) {
       }
     }
   }
-  // Estrellas fugaces que expiraron por tiempo: destello al desaparecer
   for (const a of asteroids)
     if (a.expired) { explode(a.x, a.y, 6); sfx.explode(2); }
 
@@ -954,7 +1233,6 @@ function update(dt) {
   }
   bullets = bullets.filter(b => !b.dead);
 
-  // OVNI dispara contra la nave
   for (const u of ufos) {
     if (!u.dead && !ship.dead) {
       const eb = u.tryShoot(ship.x, ship.y);
@@ -962,7 +1240,6 @@ function update(dt) {
     }
   }
 
-  // Power-up: update + recolección
   powerups.forEach(p => p.update(dt));
   for (const p of powerups) {
     if (!p.dead && dist(ship, p) < ship.radius + p.radius) {
@@ -980,7 +1257,6 @@ function update(dt) {
   }
   powerups = powerups.filter(p => !p.dead);
 
-  // Escudo: bloquea proyectiles enemigos y asteroides
   if (ship.shieldCharges > 0 && !ship.dead) {
     const shieldR = ship.radius + 8;
     for (const eb of enemyBullets) {
@@ -1005,7 +1281,6 @@ function update(dt) {
   enemyBullets = enemyBullets.filter(b => !b.dead);
   asteroids    = asteroids.filter(a => !a.dead);
 
-  // Nave vs OVNI (letal; sin protección del escudo)
   if (!ship.dead) {
     for (const u of ufos) {
       if (!u.dead && dist(ship, u) < ship.radius + u.radius) {
@@ -1015,7 +1290,6 @@ function update(dt) {
     }
   }
 
-  // Nave vs asteroide (cuando no hay escudo)
   if (ship.invincible <= 0 && ship.shieldCharges === 0) {
     for (const a of asteroids) {
       if (dist(ship, a) < ship.radius + a.radius * 0.82) {
@@ -1025,8 +1299,12 @@ function update(dt) {
     }
   }
 
-  // Nivel completado
   if (asteroids.length === 0) { nextLevel(); sfx.levelUp(); }
+}
+
+// ── updateVisuals: animaciones no simuladas ───────────────────────────────────
+function updateVisuals(dt) {
+  if (skinToast > 0) skinToast = Math.max(0, skinToast - dt);
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
@@ -1080,56 +1358,155 @@ function drawShield() {
 }
 
 function drawHUD() {
-  ctx.fillStyle = '#fff';
-  ctx.font = '15px monospace';
-
+  ctx.font      = '15px monospace';
   ctx.textAlign = 'left';
-  ctx.fillText(`SCORE  ${score}`, 14, 26);
 
-  // Indicador de boost de velocidad activo
+  ctx.fillStyle = '#fff';
+  ctx.fillText(`SCORE  ${score}`, 14, 26);
+  ctx.fillStyle = '#888';
+  ctx.fillText(`RÉCORD  ${String(bestScore).padStart(5, '0')}  ${bestName}`, 14, 46);
+
   if (ship.speedBoost > 0) {
     ctx.fillStyle = '#ffc24b';
-    ctx.fillText(`⚡ x2  ${ship.speedBoost.toFixed(1)}s`, 14, 48);
+    ctx.fillText(`x2  ${ship.speedBoost.toFixed(1)}s`, 14, 70);
   }
 
-  // Indicador de triple shot: activo (verde fuerte) o en recarga (verde atenuado)
   if (ship.tripleShot > 0) {
     ctx.fillStyle = '#7cff8a';
-    ctx.fillText(`Z — TRIPLE  ${ship.tripleShot.toFixed(1)}s`, 14, 70);
+    ctx.fillText(`Z TRIPLE  ${ship.tripleShot.toFixed(1)}s`, 14, 90);
   } else if (ship.tripleShotCd > 0) {
     ctx.fillStyle = 'rgba(124, 255, 138, 0.55)';
-    ctx.fillText(`Z — RECARGA  ${ship.tripleShotCd.toFixed(1)}s`, 14, 70);
+    ctx.fillText(`Z RECARGA  ${ship.tripleShotCd.toFixed(1)}s`, 14, 90);
   }
 
-  // Indicador de escudo activo
   if (ship.shieldCharges > 0) {
     ctx.fillStyle = '#5ad7ff';
-    ctx.fillText(`ESCUDO  x${ship.shieldCharges}`, 14, 92);
+    ctx.fillText(`ESCUDO  x${ship.shieldCharges}`, 14, 110);
+  }
+
+  if (!ship.dead) {
+    if (ship.hyperspaceCd > 0) {
+      ctx.fillStyle = 'rgba(180,220,255,0.55)';
+      ctx.fillText(`SHIFT RECARGA  ${ship.hyperspaceCd.toFixed(1)}s`, 14, 130);
+    } else {
+      ctx.fillStyle = '#b4dcff';
+      ctx.fillText(`SHIFT HIPERESPACIO listo`, 14, 130);
+    }
   }
 
   ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
   ctx.fillText(`NIVEL ${level}`, W / 2, 26);
   ctx.fillStyle = '#888';
   ctx.fillText(`SKIN: ${getSkin().name}`, W / 2, 46);
 
+  if (!audio.enabled) {
+    ctx.fillStyle = '#666';
+    ctx.fillText(`MUDO (M)`, W / 2, 66);
+  }
+
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
-
 }
 
-function drawOverlay(title, sub) {
-  ctx.textAlign   = 'center';
-  ctx.fillStyle   = '#fff';
-  ctx.font        = 'bold 46px monospace';
+function drawOverlay(title, sub, sub2) {
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.font      = 'bold 46px monospace';
   ctx.fillText(title, W / 2, H / 2 - 18);
-  ctx.font        = '18px monospace';
-  ctx.fillStyle   = 'rgba(255,255,255,0.65)';
+  ctx.font      = '18px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.65)';
   ctx.fillText(sub, W / 2, H / 2 + 22);
+  if (sub2) ctx.fillText(sub2, W / 2, H / 2 + 46);
+}
+
+function drawHelp() {
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.font      = 'bold 40px monospace';
+  ctx.fillText('ASTEROIDS', W / 2, 110);
+
+  ctx.font      = '16px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  const lines = [
+    ['←  →',      'Rotar'],
+    ['↑',          'Acelerar'],
+    ['ESPACIO',    'Disparar'],
+    ['SHIFT',      'Hiperespacio (riesgo)'],
+    ['Z',          'Triple disparo'],
+    ['S',          'Cambiar skin'],
+    ['P',          'Pausa'],
+    ['M',          'Silenciar'],
+    ['H',          'Esta ayuda'],
+  ];
+  const cx = W / 2 - 110;
+  for (let i = 0; i < lines.length; i++) {
+    const y = 180 + i * 28;
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#7cff8a';
+    ctx.fillText(lines[i][0], cx, y);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(lines[i][1], cx + 18, y);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.font      = 'bold 20px monospace';
+  ctx.fillText('ENTER  o  ESPACIO  PARA  EMPEZAR', W / 2, H - 80);
+
+  ctx.font      = '14px monospace';
+  ctx.fillStyle = '#888';
+  ctx.fillText(`Récord actual: ${bestScore}  ${bestName}`, W / 2, H - 50);
+}
+
+function drawNameEntry() {
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffc24b';
+  ctx.font      = 'bold 36px monospace';
+  ctx.fillText('¡NUEVO RÉCORD!', W / 2, H / 2 - 80);
+
+  ctx.font      = '20px monospace';
+  ctx.fillStyle = '#fff';
+  ctx.fillText(`Puntaje: ${score}`, W / 2, H / 2 - 40);
+
+  // 3 caracteres grandes con el actual parpadeando
+  ctx.font      = 'bold 64px monospace';
+  const cellW = 60;
+  const x0 = W / 2 - cellW;
+  for (let i = 0; i < 3; i++) {
+    const x = x0 + i * cellW;
+    if (i === nameIndex && Math.floor(performance.now() / 250) % 2 === 0) {
+      ctx.fillStyle = 'rgba(180,220,255,0.35)';
+      ctx.fillRect(x - 22, H / 2 - 30, 44, 64);
+    }
+    ctx.fillStyle = i === nameIndex ? '#b4dcff' : '#fff';
+    ctx.fillText(nameChars[i], x, H / 2 + 16);
+  }
+
+  ctx.font      = '15px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillText('↑ / ↓  Cambiar letra     ← / →  Mover cursor',     W / 2, H / 2 + 80);
+  ctx.fillText('ENTER  Guardar',                                   W / 2, H / 2 + 102);
+}
+
+function drawPaused() {
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, W, H);
+  drawOverlay('PAUSA', 'P  PARA  CONTINUAR', 'H  PARA  AYUDA');
 }
 
 function draw() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
+
+  drawStars();
 
   particles.forEach(p => p.draw());
   asteroids.forEach(a => a.draw());
@@ -1142,29 +1519,62 @@ function draw() {
 
   drawHUD();
 
-  // Toast al cambiar de skin
   if (skinToast > 0) {
     const alpha = Math.min(1, skinToast / 0.4);
     ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
     ctx.font      = 'bold 28px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(getSkin().name, W / 2, 130);
+    ctx.fillText(getSkin().name, W / 2, 160);
   }
 
-  if (state === 'gameover')
-    drawOverlay('GAME OVER', `PUNTAJE: ${score}   —   ESPACIO PARA REINICIAR`);
+  if (state === 'paused')    drawPaused();
+  else if (state === 'help') drawHelp();
+  else if (state === 'enterName') drawNameEntry();
+  else if (state === 'gameover') {
+    let sub = `PUNTAJE: ${score}   —   ESPACIO PARA REINICIAR`;
+    if (newRecord) sub = `¡RÉCORD! ${bestName}  ${score}   —   ESPACIO PARA REINICIAR`;
+    drawOverlay('GAME OVER', sub);
+  }
 }
 
 // ── Loop principal ────────────────────────────────────────────────────────────
-let lastTime = null;
+const SIM_STEP = 1 / 120;   // paso fijo para colisiones estables
+let lastTime  = null;
+let _accum    = 0;
 
 function loop(ts) {
-  const dt = lastTime === null ? 0 : Math.min((ts - lastTime) / 1000, 0.05);
+  const frameDt = lastTime === null ? 0 : Math.min((ts - lastTime) / 1000, 0.1);
   lastTime = ts;
-  update(dt);
+
+  const frozen = state === 'help' || state === 'paused' || state === 'enterName';
+  if (frozen) {
+    // Sin acumulación: 1 sola pasada para input; la escena no se mueve.
+    _accum = 0;
+    updateSim(frameDt);
+  } else {
+    _accum += frameDt;
+    let steps = 0;
+    while (_accum >= SIM_STEP && steps < 8) {
+      updateSim(SIM_STEP);
+      _accum -= SIM_STEP;
+      steps++;
+    }
+    if (_accum >= SIM_STEP * 3) _accum = 0; // anti-spiral-of-death
+  }
+
+  updateVisuals(frameDt);
   draw();
   requestAnimationFrame(loop);
 }
+
+// Auto-pausa al perder el foco de la pestaña
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state === 'playing') {
+    state = 'paused';
+    sfx.pause();
+    music.stop();
+  }
+});
 
 initGame();
 requestAnimationFrame(loop);
