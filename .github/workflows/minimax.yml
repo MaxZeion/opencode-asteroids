@@ -26,12 +26,10 @@ jobs:
           persist-credentials: false
 
       - name: Install MiniMax Code CLI
-        # El installer oficial (curl|bash) es el método recomendado por
-        # el fabricante: descarga Node compatible, instala @minimax-ai/code
-        # y deja el binario en /home/runner/.minimax-code/bin/mcode.
-        # El problema: el installer añade la ruta a ~/.bashrc, que los
-        # steps `run:` siguientes NO cargan. Lo arreglamos propagando la
-        # ruta explícitamente con $GITHUB_PATH.
+        # El installer oficial (curl|bash) deja el bin en
+        # /home/runner/.minimax-code/bin/mcode y lo añade a ~/.bashrc.
+        # Los steps `run:` siguientes no cargan ~/.bashrc, así que
+        # propagamos la ruta explícitamente con $GITHUB_PATH.
         run: |
           curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash
           MCODE_BIN="/home/runner/.minimax-code/bin/mcode"
@@ -45,12 +43,13 @@ jobs:
           echo "$MCODE_BIN_DIR" >> "$GITHUB_PATH"
           "$MCODE_BIN" --version
 
-      - name: Configure MiniMax API key
+      - name: Run MiniMax Code review
+        # Pasamos la key directamente como env var (mismo patrón que usa
+        # opencode.yml con el que confirmas que la key funciona). Saltamos
+        # `mcode provider set-minimax-key` porque algo en ese paso estaba
+        # guardando la key mal y el provider rechazaba la llamada.
         env:
           MCODE_PROVIDER_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-        run: mcode provider set-minimax-key
-
-      - name: Run MiniMax Code review
         run: |
           mcode exec \
             --output-format json \
