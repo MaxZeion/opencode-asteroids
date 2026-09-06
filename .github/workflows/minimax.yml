@@ -3,8 +3,13 @@
 #
 # Usamos `pull_request_target` (en lugar de `pull_request`) para que el yml
 # que se ejecuta sea SIEMPRE el de la rama base (main), sin importar desde
-# qué rama se dispare. El código a revisar se hace checkout por separado
-# desde el SHA del PR head. NO ejecutamos código del PR con secretos.
+# qué rama se dispare. El código a revisar lo recoge la action desde el
+# SHA del PR head internamente.
+#
+# Usamos la GitHub Action oficial `anomalyco/opencode/github` (la misma que
+# `opencode.yml`) en lugar de `mcode exec` directo, porque `mcode exec` en
+# CI requiere `mcode login` con flujo de browser interactivo, lo cual no
+# es viable en runners. La action maneja la auth por su cuenta.
 name: minimax
 
 on:
@@ -16,43 +21,27 @@ jobs:
   minimax:
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: read
-      pull-requests: write
+      pull-requests: read
     steps:
-      - name: Checkout code to review
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
           persist-credentials: false
 
-      - name: Install MiniMax Code CLI
-        # El installer oficial (curl|bash) deja el bin en
-        # /home/runner/.minimax-code/bin/mcode y lo añade a ~/.bashrc.
-        # Los steps `run:` siguientes no cargan ~/.bashrc, así que
-        # propagamos la ruta explícitamente con $GITHUB_PATH.
-        run: |
-          curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash
-          MCODE_BIN="/home/runner/.minimax-code/bin/mcode"
-          if [ ! -e "$MCODE_BIN" ]; then
-            echo "::error::mcode no se encontró en $MCODE_BIN tras el install"
-            ls -la /home/runner/.minimax-code/bin/ 2>/dev/null || true
-            exit 1
-          fi
-          MCODE_BIN_DIR="$(dirname "$MCODE_BIN")"
-          echo "MCODE_BIN_DIR=$MCODE_BIN_DIR"
-          echo "$MCODE_BIN_DIR" >> "$GITHUB_PATH"
-          "$MCODE_BIN" --version
-
       - name: Run MiniMax Code review
-        # Pasamos la key directamente como env var (mismo patrón que usa
-        # opencode.yml con el que confirmas que la key funciona). Saltamos
-        # `mcode provider set-minimax-key` porque algo en ese paso estaba
-        # guardando la key mal y el provider rechazaba la llamada.
+        uses: anomalyco/opencode/github@16747470f976aca3d362ad730bcd3fe82ecc2c9a # v1.18.29
         env:
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           MCODE_PROVIDER_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-        run: |
-          mcode exec \
-            --output-format json \
-            --cwd "$GITHUB_WORKSPACE" \
-            --timeout 10m \
-            "Revisa los cambios de este PR siguiendo AGENTS.md (canvas 800x600, wrap toroidal, puntuación large=20/medium=50/small=100, cero dependencias, todo en un solo game.js). Reporta en español."
+        with:
+          model: minimax/MiniMax-M3
+          prompt: |
+            Revisa los cambios de este PR siguiendo AGENTS.md:
+            - Canvas fijo en 800x600.
+            - Espacio con wrap toroidal (conservar topología al tocar movimiento/colisiones).
+            - Puntuación: large=20, medium=50, small=100 (no cambiar sin motivo).
+            - Cero dependencias: todo en un solo game.js.
+            Reporta en español.
