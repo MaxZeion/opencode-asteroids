@@ -1,9 +1,14 @@
 # MiniMax Code (Mavis) — review de PRs en GitHub.
-# Secreto necesario: MINIMAX_API_KEY (misma que ya usa opencode.yml).
+# Secreto necesario: MINIMAX_API_KEY.
+#
+# Usamos `pull_request_target` (en lugar de `pull_request`) para que el yml
+# que se ejecuta sea SIEMPRE el de la rama base (main), sin importar desde
+# qué rama se dispare. El código a revisar se hace checkout por separado
+# desde el SHA del PR head. NO ejecutamos código del PR con secretos.
 name: minimax
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize]
   workflow_dispatch:
 
@@ -12,14 +17,40 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - name: Checkout code to review
+        uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
           persist-credentials: false
 
+      - name: Set up Node.js
+        # `mcode` requiere Node 22.19+ o 24-26.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install MiniMax Code CLI
-        run: curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash
+        # Cada step `run:` abre un shell con su propio PATH; el directorio
+        # de binarios globales de npm NO siempre se hereda. Lo localizamos
+        # y lo propagamos explícitamente con $GITHUB_PATH.
+        run: |
+          npm install -g @minimax-ai/code
+          MCODE_BIN_DIR="$(npm bin -g)"
+          MCODE_BIN="$MCODE_BIN_DIR/mcode"
+          echo "MCODE_BIN_DIR=$MCODE_BIN_DIR"
+          echo "MCODE_BIN=$MCODE_BIN"
+          if [ ! -x "$MCODE_BIN" ]; then
+            echo "::error::mcode no se enlazó tras npm install (postinstall pudo fallar)"
+            ls -la "$MCODE_BIN_DIR" | head -20
+            echo "---"
+            echo "npm root -g:"; npm root -g
+            echo "ls del paquete:"; ls -la "$(npm root -g)/@minimax-ai/code" 2>&1 | head -20
+            exit 1
+          fi
+          echo "$MCODE_BIN_DIR" >> "$GITHUB_PATH"
+          "$MCODE_BIN" --version
 
       - name: Configure MiniMax API key
         env:
@@ -30,7 +61,6 @@ jobs:
         run: |
           mcode exec \
             --output-format json \
-            --permission smart \
+            --cwd "$GITHUB_WORKSPACE" \
             --timeout 10m \
-            --max-steps 30 \
             "Revisa los cambios de este PR siguiendo AGENTS.md (canvas 800x600, wrap toroidal, puntuación large=20/medium=50/small=100, cero dependencias, todo en un solo game.js). Reporta en español."
