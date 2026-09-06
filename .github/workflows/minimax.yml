@@ -1,9 +1,14 @@
 # MiniMax Code (Mavis) — review de PRs en GitHub.
 # Secreto necesario: MINIMAX_API_KEY.
+#
+# Usamos `pull_request_target` (en lugar de `pull_request`) para que el yml
+# que se ejecuta sea SIEMPRE el de la rama base (main), sin importar desde
+# qué rama se dispare. El código a revisar se hace checkout por separado
+# desde el SHA del PR head. NO ejecutamos código del PR con secretos.
 name: minimax
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize]
   workflow_dispatch:
 
@@ -12,10 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
     steps:
-      - name: Checkout repository
+      - name: Checkout code to review
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
           persist-credentials: false
 
       - name: Set up Node.js
