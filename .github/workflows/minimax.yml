@@ -18,28 +18,24 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Node.js
+        # `mcode` requiere Node 22.19+ o 24/25/26; el runner trae una LTS
+        # más vieja, así que fijamos una compatible.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install MiniMax Code CLI
-        # El instalador oficial deja `mcode` en una ruta que NO está en el PATH
-        # por defecto del runner (la añade en ~/.bashrc, que los steps `run:`
-        # no cargan). Localizamos el binario y lo propagamos a los siguientes
-        # steps vía $GITHUB_PATH.
+        # npm deja el binario en $(npm bin -g) que YA está en PATH del runner.
+        # Mucho más determinista que el curl|bash oficial (que requiere
+        # build-essential/python3 y puede fallar silenciosamente).
         run: |
-          curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash
-          MCODE_BIN="$(find "$HOME" /usr/local -maxdepth 6 -name mcode -type f -executable 2>/dev/null | head -n1)"
-          if [ -z "$MCODE_BIN" ]; then
-            echo "::error::mcode no encontrado tras el install"
-            echo "PATH=$PATH"
-            ls -la "$HOME/.local/bin" "$HOME/.mcode/bin" 2>/dev/null || true
-            exit 1
-          fi
-          echo "MCODE_BIN=$MCODE_BIN"
-          MCODE_DIR="$(dirname "$MCODE_BIN")"
-          echo "$MCODE_DIR" >> "$GITHUB_PATH"
-          "$MCODE_BIN" --version
+          npm install -g @minimax-ai/code
+          mcode --version
 
       - name: Configure MiniMax API key
         # `mcode exec` lee la key del config que crea este subcomando,
-        # no del entorno. Hay que llamarlo tras el install.
+        # no del entorno.
         env:
           MCODE_PROVIDER_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         run: mcode provider set-minimax-key
