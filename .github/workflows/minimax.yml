@@ -14,19 +14,24 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Install MiniMax Code CLI
-        run: curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash
-
-      - name: Configure MiniMax API key
-        env:
-          MCODE_PROVIDER_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-        run: mcode provider set-minimax-key
+        run: |
+          curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash
+          if ! command -v mcode >/dev/null 2>&1; then
+            echo "::error::mcode no quedó en PATH tras el install. Diagnóstico:"
+            echo "PATH=$PATH"
+            ls -la "$HOME/.local/bin/mcode" "$HOME/.mcode/bin/mcode" "/usr/local/bin/mcode" 2>/dev/null || true
+            exit 1
+          fi
+          mcode --version
 
       - name: Run MiniMax Code review
+        env:
+          MCODE_PROVIDER_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         run: |
           mcode exec \
             --output-format json \
