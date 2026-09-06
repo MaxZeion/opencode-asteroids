@@ -29,5 +29,6 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          MCODE_PROVIDER_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
         with:
           model: minimax/MiniMax-M3
