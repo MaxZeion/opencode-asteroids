@@ -1,0 +1,36 @@
+# MiniMax Code (Mavis) — review de PRs en GitHub.
+# Secreto necesario: MINIMAX_API_KEY (misma que ya usa opencode.yml).
+name: minimax
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+
+jobs:
+  minimax:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install MiniMax Code CLI
+        run: curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash
+
+      - name: Configure MiniMax API key
+        env:
+          MCODE_PROVIDER_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+        run: mcode provider set-minimax-key
+
+      - name: Run MiniMax Code review
+        run: |
+          mcode exec \
+            --output-format json \
+            --permission smart \
+            --timeout 10m \
+            --max-steps 30 \
+            "Revisa los cambios de este PR siguiendo AGENTS.md (canvas 800x600, wrap toroidal, puntuación large=20/medium=50/small=100, cero dependencias, todo en un solo game.js). Reporta en español."
