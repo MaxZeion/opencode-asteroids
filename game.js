@@ -556,6 +556,11 @@ const SKINS = [
     stroke: '#ff4d6d', boost: '#ffd24b', thrust: 'rgba(255,90,90,0.85)',
     hull: [[ 20,  0], [ 12, -4], [-12, -8], [ -8,  0], [-12,  8], [ 12,  4]],
     cockpit: 'square', cockpitOffset: [4, 0], cockpitRadius: 2 },
+  { id: 'titan', name: 'Titán',
+    stroke: '#b4dcff', boost: '#ffe04b', thrust: 'rgba(180,220,255,0.85)',
+    hull: [[ 20,  0], [-12, -9], [ -7,  0], [-12,  9]],
+    cockpit: 'dot', cockpitOffset: [6, 0], cockpitRadius: 2,
+    scale: 2, scoreMultiplier: 2 },
 ];
 
 let currentSkinIndex = 0;
@@ -653,7 +658,7 @@ class Ship {
     this.angle  = -Math.PI / 2;
     this.vx     = 0;
     this.vy     = 0;
-    this.radius = 12;
+    this.radius = 12 * (getSkin().scale || 1);
     this.thrusting     = false;
     this.invincible    = 3;
     this.shootCooldown = 0;
@@ -698,7 +703,7 @@ class Ship {
   tryShoot() {
     if (this.shootCooldown > 0 || this.dead) return [];
     this.shootCooldown = 0.2;
-    const NOSE = 21;
+    const NOSE = 21 * (getSkin().scale || 1);
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
     if (this.tripleShot > 0) {
@@ -723,6 +728,8 @@ class Ship {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
+    const skinScale = skin.scale || 1;
+    if (skinScale !== 1) ctx.scale(skinScale, skinScale);
     // Cian mientras el triple shot esté activo, dorada del skin durante boost, color base del skin en reposo
     ctx.strokeStyle = this.tripleShot > 0 ? '#7cdcff'
                     : this.speedBoost > 0 ? skin.boost
@@ -1200,7 +1207,7 @@ function updateSim(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += a.star ? STAR_POINTS : POINTS[a.size];
+        score += (a.star ? STAR_POINTS : POINTS[a.size]) * (getSkin().scoreMultiplier || 1);
         sfx.hit(a.size);
         explode(a.x, a.y, a.size * 5);
         sfx.explode(a.size);
@@ -1225,7 +1232,7 @@ function updateSim(dt) {
       if (!u.dead && !b.dead && dist(b, u) < u.radius) {
         b.dead = true;
         u.dead = true;
-        score += UFO_POINTS;
+        score += UFO_POINTS * (getSkin().scoreMultiplier || 1);
         explode(u.x, u.y, 12);
         sfx.ufoDie();
       }

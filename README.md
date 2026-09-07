@@ -59,7 +59,7 @@ Luego visita `http://localhost:3000`.
 - **Power-up de escudo** (drop de asteroides, ícono cian): al recogerlo aparece una burbuja alrededor de la nave con 3 cargas. Cada impacto (proyectil del OVNI **o** asteroide) consume una carga y destruye el proyectil/asteroide. Sin cargas, el escudo desaparece
 - **Habilidad de triple shot**: pulsa `Z` para disparar 3 balas en abanico durante 5 s (cooldown 20 s; la nave se tinta de cian mientras está activa)
 - Estrella fugaz: asteroide dorado con estela, muy rápido, que desaparece en ~8s (150 pts, se parte como los demás)
-- **Skins personalizables**: 5 diseños de nave (Clásica, Dardo, Delta, Flecha, Pixel). Pulsa `S` para ciclar; la elección persiste en `localStorage` y se muestra un toast con el nombre al cambiarla
+- **Skins personalizables**: 6 diseños de nave (Clásica, Dardo, Delta, Flecha, Pixel, Titán). La skin **Titán** duplica el tamaño de la nave y multiplica por 2 la puntuación de asteroides, estrella fugaz y OVNI (a cambio de un blanco de colisión más grande). Pulsa `S` para ciclar; la elección persiste en `localStorage` y se muestra un toast con el nombre al cambiarla
 - **Hiperespacio** (tecla `Shift`): teletransporta la nave a una posición aleatoria con 4 s de cooldown y 1.2 s de invencibilidad post-llegada. Riesgo: si el destino coincide con un asteroide o un OVNI, la nave muere
 - **High-score persistente**: al perder todas las vidas, si superaste el récord anterior se piden 3 iniciales (flechas + Enter) y se guardan en `localStorage` junto al puntaje
 - **Música chiptune sintetizada**: loop de fondo en Re menor (lead square con lowpass + bajo triangle), volumen bajo, se silencia con `M` y se pausa automáticamente al pausar el juego
