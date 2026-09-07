@@ -14,6 +14,7 @@ jobs:
       - name: Asegurar etiquetas
         env:
           GH_TOKEN: ${{ secrets.ISSUE_FORMATTER_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh label create bug           --color "d73a4a" --description "Reporte de error o comportamiento inesperado" --force
           gh label create enhancement   --color "a2eeef" --description "Nueva funcionalidad o mejora"           --force
@@ -23,6 +24,7 @@ jobs:
       - name: Formatear issue
         env:
           GH_TOKEN: ${{ secrets.ISSUE_FORMATTER_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
