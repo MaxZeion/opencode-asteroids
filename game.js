@@ -2,8 +2,20 @@
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-const W = 800;
-const H = 600;
+let W, H;
+let stars = [];   // se re-dispersa en cada resize; ver resize() arriba
+
+// El canvas ocupa todo el viewport; se recalcula en cada cambio de tamaño
+// de la ventana para que el juego aproveche el máximo espacio disponible.
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width  = W;
+  canvas.height = H;
+  if (stars.length) makeStars();
+}
+window.addEventListener('resize', resize);
+resize();
 
 // ── Audio (WebAudio sintetizado, sin archivos externos) ─────────────────────────
 const audio = {
@@ -195,8 +207,6 @@ const STAR_LAYERS = [
   { count:  55, speed:  48, r: 1.0, b: 0.55, thrustMul: 1.25 },
   { count:  25, speed: 110, r: 1.4, b: 0.85, thrustMul: 1.55 },
 ];
-
-let stars = [];
 
 function makeStars() {
   stars = [];

@@ -18,6 +18,6 @@ There is no `package.json`, no build step, no bundler, no test suite, no lint co
 
 - Everything lives in one file (`game.js`); keep it that way. No new modules, no frameworks, no external libraries.
 - Codebase and README are in Spanish; match that language in any new comments or docs you add.
-- Canvas is fixed at 800×600 (`index.html`).
+- El canvas ocupa todo el viewport (`index.html` y `game.js`): `W` y `H` se recalculan en cada `resize` para aprovechar el máximo espacio posible. El juego asume tamaño arbitrario y sigue funcionando con cualquier proporción.
 - Space wraps at edges (toroidal topology) — preserve this when touching movement/collision code.
 - Scoring (do not change casually): large = 20, medium = 50, small = 100.
