@@ -1,10 +1,9 @@
 # MiniMax Code (Mavis) — review de PRs en GitHub.
 # Secreto necesario: MINIMAX_API_KEY.
 #
-# Usamos `pull_request_target` (en lugar de `pull_request`) para que el yml
-# que se ejecuta sea SIEMPRE el de la rama base (main), sin importar desde
-# qué rama se dispare. El código a revisar lo recoge la action desde el
-# SHA del PR head internamente.
+# Usamos `pull_request` porque `anomalyco/opencode/github` no soporta
+# `pull_request_target`. El job se limita a PRs del mismo repositorio para
+# que los secretos no se expongan a forks.
 #
 # Usamos la GitHub Action oficial `anomalyco/opencode/github` (la misma que
 # `opencode.yml`) en lugar de `mcode exec` directo, porque `mcode exec` en
@@ -13,7 +12,7 @@
 name: minimax
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize]
   workflow_dispatch:
 
