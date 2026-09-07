@@ -1,0 +1,124 @@
+name: issue-formatter
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions: {}
+
+jobs:
+  format:
+    if: github.event.issue.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Asegurar etiquetas
+        env:
+          GH_TOKEN: ${{ secrets.ISSUE_FORMATTER_TOKEN }}
+        run: |
+          gh label create bug           --color "d73a4a" --description "Reporte de error o comportamiento inesperado" --force
+          gh label create enhancement   --color "a2eeef" --description "Nueva funcionalidad o mejora"           --force
+          gh label create question      --color "d876e3" --description "Pregunta o duda sobre el juego"          --force
+          gh label create documentation --color "0075ca" --description "Cambios o mejoras en documentación"     --force
+
+      - name: Formatear issue
+        env:
+          GH_TOKEN: ${{ secrets.ISSUE_FORMATTER_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE_CREATED_AT: ${{ github.event.issue.created_at }}
+        run: |
+          node - <<'NODE_EOF'
+          const { execSync } = require('child_process');
+          const fs = require('fs');
+
+          const title      = process.env.ISSUE_TITLE      || '';
+          const body       = process.env.ISSUE_BODY       || '';
+          const author     = process.env.ISSUE_AUTHOR     || '';
+          const createdAt  = process.env.ISSUE_CREATED_AT || '';
+          const issueNum   = process.env.ISSUE_NUMBER;
+
+          const MARK = '<!-- Bloque generado por issue-formatter. No editar. -->';
+
+          if (body.startsWith(MARK)) {
+            console.log('Issue ya formateado, saliendo.');
+            process.exit(0);
+          }
+
+          const KEYWORDS = {
+            bug:           ['bug', 'error', 'crash', 'fallo', 'falla', 'rompe', 'se cierra', 'no funciona', 'no responde', 'cuelga', 'exception', 'broken', 'defecto'],
+            documentation: ['documentación', 'documentacion', 'readme', 'docs/'],
+            enhancement:   ['feature', 'mejora', 'sugerencia', 'propuesta', 'añadir', 'agregar', 'nueva'],
+            question:      ['pregunta', 'duda', 'cómo se', 'como se', 'cómo ', 'como ', 'ayuda'],
+          };
+
+          const lc = (title + ' ' + body).toLowerCase();
+          let detectedType = 'needs-triage';
+          let detectedLabel = null;
+          for (const [label, kws] of Object.entries(KEYWORDS)) {
+            if (kws.some(k => lc.includes(k))) {
+              detectedType = label;
+              detectedLabel = label;
+              break;
+            }
+          }
+
+          const FILE_RX = /(game\.js|index\.html|README\.md|readme\.md|README|readme|favicon\.svg|\.github\/workflows\/[\w.-]+)/gi;
+          const mentionedFiles = Array.from(new Set(
+            (body.match(FILE_RX) || []).map(m => m.toLowerCase() === 'readme' ? 'README.md' : m)
+          ));
+
+          let checklist = '';
+          if (detectedType === 'bug') {
+            checklist = [
+              '## Checklist de triage',
+              '- [ ] Pasos para reproducir',
+              '- [ ] Comportamiento esperado',
+              '- [ ] Comportamiento observado',
+              '- [ ] Navegador y versión',
+              '- [ ] Captura o video (si aplica)',
+              '',
+            ].join('\n');
+          } else if (detectedType === 'enhancement') {
+            checklist = [
+              '## Checklist de triage',
+              '- [ ] Motivación / problema que resuelve',
+              '- [ ] Alternativas consideradas',
+              '- [ ] Mockup o captura (si aplica)',
+              '',
+            ].join('\n');
+          }
+
+          const labelsLine  = detectedLabel ? '`' + detectedLabel + '`' : '_pendiente de triage manual_';
+          const filesLine   = mentionedFiles.length ? mentionedFiles.map(f => '`' + f + '`').join(', ') : null;
+          const originalSec = body.trim() ? body : '_El usuario no añadió descripción._';
+
+          const newBody = [
+            MARK,
+            '',
+            '## Metadata',
+            '- **Autor:** @' + author,
+            '- **Fecha de apertura:** ' + createdAt,
+            '- **Tipo detectado:** `' + detectedType + '`',
+            filesLine ? '- **Archivos mencionados:** ' + filesLine : null,
+            '- **Labels aplicadas:** ' + labelsLine,
+            '',
+            checklist,
+            '---',
+            '',
+            '## Descripción original',
+            originalSec,
+            '',
+            '---',
+            '<sub>Generado por `.github/workflows/issue-formatter.yml`</sub>',
+          ].filter(l => l !== null).join('\n');
+
+          fs.writeFileSync('newbody.md', newBody);
+
+          const args = ['issue', 'edit', String(issueNum), '--body-file', 'newbody.md'];
+          if (detectedLabel) args.push('--add-label', detectedLabel);
+
+          const cmd = 'gh ' + args.map(a => "'" + a.replace(/'/g, "'\\''") + "'").join(' ');
+          execSync(cmd, { stdio: 'inherit' });
+          NODE_EOF
