@@ -1,9 +1,10 @@
 # MiniMax Code (Mavis) — review de PRs en GitHub.
 # Secreto necesario: MINIMAX_API_KEY.
 #
-# Usamos `pull_request` porque `anomalyco/opencode/github` no soporta
-# `pull_request_target`. El job se limita a PRs del mismo repositorio para
-# que los secretos no se expongan a forks.
+# Usamos `pull_request` (no `pull_request_target`) porque la action
+# `anomalyco/opencode/github` rechaza ese evento. El guard de seguridad
+# `if: ... == github.repository` evita exponer MINIMAX_API_KEY a PRs de
+# forks.
 #
 # Usamos la GitHub Action oficial `anomalyco/opencode/github` (la misma que
 # `opencode.yml`) en lugar de `mcode exec` directo, porque `mcode exec` en
