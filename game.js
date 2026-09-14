@@ -4,18 +4,29 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 let W, H;
 let stars = [];   // se re-dispersa en cada resize; ver resize() arriba
+let vignette = null;   // gradiente de viñeta, se reconstruye en cada resize
 
 // El canvas ocupa todo el viewport; se recalcula en cada cambio de tamaño
-// de la ventana para que el juego aproveche el máximo espacio disponible.
+// de la ventana para que el juego aproveche el máximo espacio posible.
 function resize() {
   W = window.innerWidth;
   H = window.innerHeight;
   canvas.width  = W;
   canvas.height = H;
+  buildVignette();
   if (stars.length) makeStars();
 }
 window.addEventListener('resize', resize);
 resize();
+
+// Viñeta: oscurece los bordes para dar profundidad; se cachea en resize
+function buildVignette() {
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35,
+                                     W / 2, H / 2, Math.hypot(W, H) / 2);
+  g.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  g.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+  vignette = g;
+}
 
 // ── Audio (WebAudio sintetizado, sin archivos externos) ─────────────────────────
 const audio = {
@@ -202,6 +213,11 @@ const dist  = (a, b)   => Math.hypot(a.x - b.x, a.y - b.y);
 const rand  = (min, max) => min + Math.random() * (max - min);
 const randInt = (min, max) => Math.floor(rand(min, max + 1));
 
+// ── Screen shake ──────────────────────────────────────────────────────────────
+// Magnitud en px; decae exponencialmente en updateVisuals y se aplica en draw()
+let shake = 0;
+function addShake(m) { shake = Math.min(12, shake + m); }
+
 // ── Fondo de estrellas (paralaje en 3 capas) ──────────────────────────────────
 // Lejana: muchas, pequeñas, lentas, tenues.   Media y cercana: menos, más rápidas.
 // Todas avanzan hacia abajo; cuando la nave acelera, la capa cercana se acelera
@@ -263,12 +279,23 @@ function drawStars() {
 }
 
 function drawNebula() {
+  // Primera nebulosa: púrpura, esquina superior derecha
   const cx = W * 0.82, cy = H * 0.18;
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.65);
   g.addColorStop(0,   'rgba(60, 30, 120, 0.10)');
   g.addColorStop(0.6, 'rgba(30, 20, 80, 0.04)');
   g.addColorStop(1,   'rgba(30, 20, 80, 0)');
   ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // Segunda nebulosa: azul verdosa, inferior izquierda, con deriva lenta
+  const cx2 = W * 0.15 + Math.sin(_starsTime * 0.05) * W * 0.03;
+  const cy2 = H * 0.85 + Math.cos(_starsTime * 0.04) * H * 0.03;
+  const g2 = ctx.createRadialGradient(cx2, cy2, 0, cx2, cy2, Math.max(W, H) * 0.6);
+  g2.addColorStop(0,   'rgba(20, 80, 110, 0.08)');
+  g2.addColorStop(0.6, 'rgba(15, 50, 90, 0.03)');
+  g2.addColorStop(1,   'rgba(15, 50, 90, 0)');
+  ctx.fillStyle = g2;
   ctx.fillRect(0, 0, W, H);
 }
 
@@ -293,10 +320,39 @@ class Bullet {
   }
 
   draw() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Estela: segmento en dirección opuesta al movimiento (largo fijo)
+    const TAIL = 0.045;   // segundos de estela
+    const tx = this.x - this.vx * TAIL;
+    const ty = this.y - this.vy * TAIL;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(90, 200, 255, 0.30)';
+    ctx.lineWidth   = 5;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(this.x, this.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(210, 245, 255, 0.85)';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(this.x, this.y);
+    ctx.stroke();
+
+    // Núcleo con leve halo cian
+    ctx.fillStyle = 'rgba(140, 220, 255, 0.35)';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius + 3, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.fillStyle = '#fff';
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -321,6 +377,21 @@ class EnemyBullet {
   }
 
   draw() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Estela roja: segmento en dirección opuesta al movimiento
+    const TAIL = 0.06;
+    const tx = this.x - this.vx * TAIL;
+    const ty = this.y - this.vy * TAIL;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255, 90, 74, 0.25)';
+    ctx.lineWidth   = 6;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(this.x, this.y);
+    ctx.stroke();
+
     ctx.fillStyle = 'rgba(255, 90, 74, 0.35)';
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius + 3, 0, Math.PI * 2);
@@ -330,6 +401,7 @@ class EnemyBullet {
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -1038,6 +1110,76 @@ class Particle {
   }
 }
 
+// ── Destello de explosión (vida corta, suma luz) ─────────────────────────────
+class Flash {
+  constructor(x, y, maxR, color = '255,255,255') {
+    this.x    = x;
+    this.y    = y;
+    this.maxR = maxR;
+    this.ttl  = 0.18;
+    this.life = 0.18;
+    this.dead = false;
+    this.color = color;
+  }
+
+  update(dt) {
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  draw() {
+    const t = 1 - this.ttl / this.life;          // 0..1
+    const r = this.maxR * (0.4 + 0.6 * t);
+    const a = (1 - t) * 0.9;
+    const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r);
+    g.addColorStop(0,   `rgba(255, 255, 255, ${a.toFixed(3)})`);
+    g.addColorStop(0.4, `rgba(${this.color}, ${(a * 0.7).toFixed(3)})`);
+    g.addColorStop(1,   `rgba(${this.color}, 0)`);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ── Texto flotante de puntos ("+50") ─────────────────────────────────────────
+const popups = [];
+
+class Popup {
+  constructor(x, y, text, color = '#fff') {
+    this.x     = x;
+    this.y     = y;
+    this.text  = text;
+    this.color = color;
+    this.ttl   = 0.8;
+    this.life  = 0.8;
+    this.dead  = false;
+  }
+
+  update(dt) {
+    this.y -= 32 * dt;
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  draw() {
+    ctx.save();
+    ctx.globalAlpha = (this.ttl / this.life).toFixed(3);
+    ctx.font      = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = this.color;
+    ctx.fillText(this.text, this.x, this.y);
+    ctx.restore();
+  }
+}
+
+function addPopup(x, y, pts, color) {
+  popups.push(new Popup(x, y, `+${pts}`, color));
+}
+
 // ── PowerUp (velocidad x2) ───────────────────────────────────────────────────
 class PowerUp {
   constructor(x, y) {
@@ -1377,6 +1519,8 @@ function initGame() {
   powerups      = [];
   enemyBullets  = [];
   ufos          = [];
+  popups.length = 0;
+  shake         = 0;
   score         = 0;
   lives         = 3;
   level         = 1;
@@ -1399,25 +1543,30 @@ function nextLevel() {
   ufos          = [];
   ufoSpawnTimer = rand(UFO_SPAWN_MIN, UFO_SPAWN_MAX);
   ship.reset();
+  popups.length = 0;
   spawnAsteroids(3 + level);
   maybeSpawnStar();
 }
 
 function explode(x, y, count = 8, color) {
   for (let i = 0; i < count; i++) particles.push(new Particle(x, y, color));
+  particles.push(new Flash(x, y, 14 + count * 1.8, color || '255,255,255'));
 }
 
 // Efecto del power-up Pulse: destruye todos los asteroides y empuja los OVNI
 function applyPulse(ship) {
   particles.push(new RingParticle(ship.x, ship.y, '120,220,255'));
-  let destroyed = 0;
+  addShake(10);
+  let gained = 0;
   for (const a of asteroids) {
     if (a.dead) continue;
     a.dead = true;
-    score += (a.star ? STAR_POINTS : POINTS[a.size]) * (getSkin().scoreMultiplier || 1);
+    const pts = (a.star ? STAR_POINTS : POINTS[a.size]) * (getSkin().scoreMultiplier || 1);
+    score += pts;
+    gained += pts;
     explode(a.x, a.y, a.size * 4);
-    destroyed++;
   }
+  if (gained > 0) addPopup(ship.x, ship.y - 24, gained, '#7cdcff');
   for (const u of ufos) {
     if (u.dead) continue;
     u.vx = -u.vx;
@@ -1431,6 +1580,7 @@ function applyPulse(ship) {
 
 function killShip() {
   explode(ship.x, ship.y, 14);
+  addShake(9);
   sfx.death();
   ship.dead = true;
   lives--;
@@ -1613,7 +1763,10 @@ function updateSim(dt) {
       if (!a.dead && !b.dead && dist(b, a) < a.radius) {
         b.dead = true;
         a.dead = true;
-        score += (a.star ? STAR_POINTS : POINTS[a.size]) * (getSkin().scoreMultiplier || 1);
+        const pts = (a.star ? STAR_POINTS : POINTS[a.size]) * (getSkin().scoreMultiplier || 1);
+        score += pts;
+        addPopup(a.x, a.y, pts, a.star ? '#ffd24b' : '#fff');
+        if (a.size === 3 || a.star) addShake(2);
         sfx.hit(a.size);
         explode(a.x, a.y, a.size * 5);
         sfx.explode(a.size);
@@ -1638,7 +1791,10 @@ function updateSim(dt) {
       if (!u.dead && !b.dead && dist(b, u) < u.radius) {
         b.dead = true;
         u.dead = true;
-        score += u.points * (getSkin().scoreMultiplier || 1);
+        const pts = u.points * (getSkin().scoreMultiplier || 1);
+        score += pts;
+        addPopup(u.x, u.y, pts, '#7cdcff');
+        addShake(4);
         explode(u.x, u.y, 12);
         sfx.ufoDie();
         u.onDestroyed();
@@ -1661,18 +1817,22 @@ function updateSim(dt) {
       if (p instanceof ShieldPowerUp) {
         ship.shieldCharges = SHIELD_CHARGES;
         explode(p.x, p.y, 8, '90,215,255');
+        popups.push(new Popup(p.x, p.y - 14, 'ESCUDO +3', '#5ad7ff'));
         sfx.shield();
       } else if (p instanceof OverdrivePowerUp) {
         ship.overdrive = OVERDRIVE_DURATION;
         explode(p.x, p.y, 10, '255,210,75');
+        popups.push(new Popup(p.x, p.y - 14, 'OVERDRIVE', '#ffd24b'));
         sfx.overdrive();
       } else if (p instanceof PulsePowerUp) {
         applyPulse(ship);
         explode(p.x, p.y, 14, '120,220,255');
+        popups.push(new Popup(p.x, p.y - 14, 'PULSE', '#7cdcff'));
         sfx.pulse();
       } else {
         ship.speedBoost = SPEED_BOOST_DURATION;
         explode(p.x, p.y, 6);
+        popups.push(new Popup(p.x, p.y - 14, 'x2 VELOCIDAD', '#ffc24b'));
         sfx.powerup();
       }
     }
@@ -1727,6 +1887,17 @@ function updateSim(dt) {
 // ── updateVisuals: animaciones no simuladas ───────────────────────────────────
 function updateVisuals(dt) {
   if (skinToast > 0) skinToast = Math.max(0, skinToast - dt);
+
+  // Decaimiento del screen shake
+  shake *= Math.exp(-8 * dt);
+  if (shake < 0.05) shake = 0;
+
+  // Textos de puntos: corren salvo en estados congelados
+  if (state !== 'paused' && state !== 'help' && state !== 'enterName') {
+    popups.forEach(p => p.update(dt));
+    for (let i = popups.length - 1; i >= 0; i--)
+      if (popups[i].dead) popups.splice(i, 1);
+  }
 }
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
@@ -1936,6 +2107,11 @@ function draw() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
 
+  // El mundo (y todo lo que vive en él) se dibuja con el offset del shake;
+  // el HUD y los overlays van fuera para mantenerse estables.
+  ctx.save();
+  if (shake > 0) ctx.translate(rand(-shake, shake), rand(-shake, shake));
+
   drawNebula();
   drawStars();
 
@@ -1947,6 +2123,14 @@ function draw() {
   powerups.forEach(p => p.draw());
   ship.draw();
   drawShield();
+  popups.forEach(p => p.draw());
+
+  ctx.restore();
+
+  if (vignette) {
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   drawHUD();
 
