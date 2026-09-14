@@ -82,7 +82,11 @@ const sfx = {
   tripleOn()    { audio.beep({ freq: 500,  type: 'triangle', dur: 0.2,  vol: 0.2, slide: 800 }); },
   gameOver()    { audio.beep({ freq: 300,  type: 'sawtooth', dur: 0.4,  vol: 0.3, slide: -200 }); },
   hyperspace()  { audio.beep({ freq: 1400, type: 'sawtooth', dur: 0.18, vol: 0.18, slide: -1200 });
-                  audio.noise({ dur: 0.08, vol: 0.12, lp: 3000 }); },
+                   audio.noise({ dur: 0.08, vol: 0.12, lp: 3000 }); },
+  overdrive()   { audio.beep({ freq: 900,  type: 'square',   dur: 0.12, vol: 0.22, slide:  900 });
+                   setTimeout(() => audio.beep({ freq: 1300, type: 'square', dur: 0.10, vol: 0.18, slide: 600 }), 60); },
+  pulse()       { audio.beep({ freq: 220,  type: 'sine',     dur: 0.30, vol: 0.25, slide:  900 });
+                   audio.noise({ dur: 0.25, vol: 0.30, lp: 1400 }); },
   pause()       { audio.beep({ freq: 440,  type: 'square',   dur: 0.06, vol: 0.15, slide: -120 }); },
   resume()      { audio.beep({ freq: 440,  type: 'square',   dur: 0.06, vol: 0.15, slide:  120 }); },
   newRecord()   { audio.beep({ freq: 523,  type: 'square',   dur: 0.10, vol: 0.18 });
@@ -212,6 +216,10 @@ function makeStars() {
   stars = [];
   for (const L of STAR_LAYERS) {
     for (let i = 0; i < L.count; i++) {
+      const roll = Math.random();
+      const tint = roll < 0.04 ? 'blue'
+                 : roll < 0.08 ? 'red'
+                 : 'white';
       stars.push({
         x:  Math.random() * W,
         y:  Math.random() * H,
@@ -222,6 +230,7 @@ function makeStars() {
         tm: L.thrustMul,
         tw: Math.random() * Math.PI * 2,
         tws: rand(1.5, 4),
+        tint,
       });
     }
   }
@@ -239,16 +248,28 @@ function updateStars(dt) {
 let _starsTime = 0;
 function drawStars() {
   _starsTime += 1 / 60; // aproximación; el twinkle no necesita ser exacto
-  ctx.fillStyle = '#fff';
   for (const s of stars) {
     const tw = s.b * (0.7 + 0.3 * Math.sin(_starsTime * s.tws + s.tw));
     if (tw < 0.05) continue;
     ctx.globalAlpha = tw;
+    ctx.fillStyle = s.tint === 'blue' ? 'rgba(180, 210, 255, 1)'
+                  : s.tint === 'red'  ? 'rgba(255, 200, 200, 1)'
+                  : '#fff';
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+}
+
+function drawNebula() {
+  const cx = W * 0.82, cy = H * 0.18;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.65);
+  g.addColorStop(0,   'rgba(60, 30, 120, 0.10)');
+  g.addColorStop(0.6, 'rgba(30, 20, 80, 0.04)');
+  g.addColorStop(1,   'rgba(30, 20, 80, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
 }
 
 // ── Bullet ────────────────────────────────────────────────────────────────────
@@ -326,6 +347,9 @@ const SPEED_BOOST_DURATION  = 5;      // segundos que dura el efecto (2x THRUST)
 const TRIPLE_SHOT_DURATION  = 5;      // segundos activo disparando 3 balas en abanico
 const TRIPLE_SHOT_COOLDOWN  = 20;     // segundos de recarga entre activaciones
 
+// ── Power-up overdrive (drop del OVNI) ───────────────────────────────────────
+const OVERDRIVE_DURATION    = 4;      // segundos de ráfaga rápida tras recoger el drop
+
 // ── Estrella fugaz ───────────────────────────────────────────────────────────
 const STAR_CHANCE  = 0.6;    // probabilidad de spawn por nivel iniciado
 const STAR_SPEED   = 300;    // px/s (vs 32–85 de los normales)
@@ -337,13 +361,18 @@ const SHIELD_CHANCE  = 0.10;  // probabilidad de drop por asteroide (excluyente 
 const SHIELD_CHARGES = 3;     // impactos que absorbe antes de agotarse
 
 // ── OVNI enemigo ─────────────────────────────────────────────────────────────
-const UFO_SPAWN_MIN = 8;      // segundos mínimos entre spawns
-const UFO_SPAWN_MAX = 14;     // segundos máximos entre spawns
-const UFO_SPEED     = 140;    // px/s
-const UFO_RADIUS    = 18;     // radio de colisión / dibujo
-const UFO_FIRE_MIN  = 1.2;    // segundos mínimos entre disparos
-const UFO_FIRE_MAX  = 1.8;
-const UFO_POINTS    = 200;
+const UFO_SPAWN_MIN    = 8;       // segundos mínimos entre spawns
+const UFO_SPAWN_MAX    = 14;      // segundos máximos entre spawns
+const UFO_SMALL_RADIUS = 12;      // radio del pequeño (rápido, dispara poco)
+const UFO_LARGE_RADIUS = 22;      // radio del grande (lento, dispara más)
+const UFO_SMALL_SPEED  = 200;
+const UFO_LARGE_SPEED  = 100;
+const UFO_SMALL_FIRE_MIN = 1.6;
+const UFO_SMALL_FIRE_MAX = 2.4;
+const UFO_LARGE_FIRE_MIN = 0.9;
+const UFO_LARGE_FIRE_MAX = 1.4;
+const UFO_SMALL_POINTS  = 200;
+const UFO_LARGE_POINTS  = 500;
 
 class Asteroid {
   constructor(x, y, size = 3, star = false) {
@@ -373,6 +402,18 @@ class Asteroid {
       const a = (i / n) * Math.PI * 2;
       const r = this.radius * rand(0.6, 1.0);
       this.verts.push([Math.cos(a) * r, Math.sin(a) * r]);
+    }
+
+    // Cráteres: 2-3 hundimientos con borde iluminado
+    this.craters = [];
+    const nc = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < nc; i++) {
+      this.craters.push({
+        x:    Math.cos(Math.random() * Math.PI * 2) * this.radius * 0.45,
+        y:    Math.sin(Math.random() * Math.PI * 2) * this.radius * 0.45,
+        r:    this.radius * (0.08 + Math.random() * 0.08),
+        hlA:  Math.random() * Math.PI * 2,   // ángulo del highlight
+      });
     }
   }
 
@@ -433,20 +474,41 @@ class Asteroid {
     this.drawRock();
   }
 
-  // Asteroide normal: polígono irregular blanco
+  // Asteroide normal: polígono irregular blanco con relleno y cráteres
   drawRock() {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.rot);
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth   = 1.5;
-    ctx.lineJoin    = 'round';
+    ctx.lineJoin = 'round';
+
+    // Polígono
     ctx.beginPath();
     ctx.moveTo(this.verts[0][0], this.verts[0][1]);
     for (let i = 1; i < this.verts.length; i++)
       ctx.lineTo(this.verts[i][0], this.verts[i][1]);
     ctx.closePath();
+    ctx.fillStyle = 'rgba(60, 60, 60, 0.25)';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth   = 1.5;
     ctx.stroke();
+
+    // Cráteres
+    for (const c of this.craters) {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(20, 20, 20, 0.6)';
+      ctx.fill();
+
+      // Highlight en el borde del cráter
+      const hx = c.x + Math.cos(c.hlA) * c.r;
+      const hy = c.y + Math.sin(c.hlA) * c.r;
+      ctx.beginPath();
+      ctx.arc(hx, hy, c.r * 0.4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.fill();
+    }
+
     ctx.restore();
   }
 
@@ -595,19 +657,26 @@ function cycleSkin() { setSkin(currentSkinIndex + 1); sfx.skin(); }
 
 // ── OVNI enemigo ─────────────────────────────────────────────────────────────
 class Ufo {
-  constructor() {
-    this.radius    = UFO_RADIUS;
+  constructor(size) {
+    this.size      = size || (Math.random() < 0.5 ? 'small' : 'large');
+    this.radius    = this.size === 'small' ? UFO_SMALL_RADIUS : UFO_LARGE_RADIUS;
+    this.speed     = this.size === 'small' ? UFO_SMALL_SPEED  : UFO_LARGE_SPEED;
     this.dead      = false;
-    this.fireTimer = rand(UFO_FIRE_MIN, UFO_FIRE_MAX);
+    this.fireTimer = this.size === 'small'
+      ? rand(UFO_SMALL_FIRE_MIN, UFO_SMALL_FIRE_MAX)
+      : rand(UFO_LARGE_FIRE_MIN, UFO_LARGE_FIRE_MAX);
+    this.t           = 0;     // reloj de animaciones
+    this.windowPhase = 0;     // índice de ventanilla iluminada
+    this.windowDir   = 1;     // alterna sentido del recorrido
 
     const edge = randInt(0, 3);
     let x, y, vx, vy;
-    const m = UFO_RADIUS + 2;
+    const m = this.radius + 2;
     switch (edge) {
-      case 0: x = rand(m, W - m); y =  m;          vx = 0;           vy =  UFO_SPEED; break;
-      case 1: x = W - m;          y = rand(m, H - m); vx = -UFO_SPEED; vy = 0;           break;
-      case 2: x = rand(m, W - m); y = H - m;          vx = 0;           vy = -UFO_SPEED; break;
-      case 3: x = m;              y = rand(m, H - m); vx =  UFO_SPEED; vy = 0;           break;
+      case 0: x = rand(m, W - m); y =  m;            vx = 0;            vy =  this.speed; break;
+      case 1: x = W - m;          y = rand(m, H - m); vx = -this.speed;  vy = 0;            break;
+      case 2: x = rand(m, W - m); y = H - m;          vx = 0;            vy = -this.speed;  break;
+      case 3: x = m;              y = rand(m, H - m); vx =  this.speed;  vy = 0;            break;
     }
     this.x = x;
     this.y = y;
@@ -615,7 +684,13 @@ class Ufo {
     this.vy = vy;
   }
 
+  get points() {
+    return this.size === 'small' ? UFO_SMALL_POINTS : UFO_LARGE_POINTS;
+  }
+
   update(dt) {
+    this.t += dt;
+    this.windowPhase += dt * (this.size === 'small' ? 5 : 4);
     this.x = wrap(this.x + this.vx * dt, W);
     this.y = wrap(this.y + this.vy * dt, H);
     this.fireTimer -= dt;
@@ -623,37 +698,155 @@ class Ufo {
 
   tryShoot(shipX, shipY) {
     if (this.fireTimer > 0) return null;
-    this.fireTimer = rand(UFO_FIRE_MIN, UFO_FIRE_MAX);
-    const angle = Math.atan2(shipY - this.y, shipX - this.x) + rand(-0.15, 0.15);
+    this.fireTimer = this.size === 'small'
+      ? rand(UFO_SMALL_FIRE_MIN, UFO_SMALL_FIRE_MAX)
+      : rand(UFO_LARGE_FIRE_MIN, UFO_LARGE_FIRE_MAX);
+    const spread = this.size === 'small' ? 0.10 : 0.18;
+    const angle = Math.atan2(shipY - this.y, shipX - this.x) + rand(-spread, spread);
     return new EnemyBullet(this.x, this.y, angle);
   }
 
+  // Suelta un power-up al morir (50/50 entre overdrive y pulse)
+  onDestroyed() {
+    if (Math.random() < 0.5) {
+      powerups.push(new OverdrivePowerUp(this.x, this.y));
+    } else {
+      powerups.push(new PulsePowerUp(this.x, this.y));
+    }
+  }
+
   draw() {
-    const w = UFO_RADIUS * 1.8;
-    const h = UFO_RADIUS * 0.7;
+    const r = this.radius;
+    const w = r * 1.8;          // semieje mayor del cuerpo
+    const h = r * 0.7;          // semieje menor del cuerpo
+    const domeR = r * 0.85;
+    const tilt = Math.sin(this.t * 3) * 0.06;
+    const domeScale = 1 + Math.sin(this.t * 4) * 0.08;
+    const thrust = 0.6 + 0.4 * Math.sin(this.t * 8);
+    const warning = this.fireTimer < 0.4 ? 1 - this.fireTimer / 0.4 : 0;
 
     ctx.save();
     ctx.translate(this.x, this.y);
+    ctx.rotate(tilt);
 
-    ctx.fillStyle   = '#000';
+    // 0) Haz de aviso cuando va a disparar (debajo del OVNI)
+    if (warning > 0) {
+      const dirX = Math.sign(this.vx) || 0;
+      const dirY = Math.sign(this.vy) || 0;
+      const coneX = dirX * w * 1.3;
+      const coneY = dirY * w * 1.3;
+      const g = ctx.createRadialGradient(0, 0, 2, 0, 0, Math.hypot(coneX, coneY));
+      g.addColorStop(0, `rgba(255, 200, 80, ${0.55 * warning})`);
+      g.addColorStop(1, 'rgba(255, 100, 40, 0)');
+      ctx.save();
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(coneX + dirY * w * 0.6, coneY - dirX * w * 0.6);
+      ctx.lineTo(coneX - dirY * w * 0.6, coneY + dirX * w * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 1) Pinzas laterales
+    ctx.fillStyle   = '#0a0a0a';
     ctx.strokeStyle = '#fff';
-    ctx.lineWidth   = 1.5;
-
+    ctx.lineWidth   = 1.2;
     ctx.beginPath();
-    ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+    ctx.moveTo(-w * 0.85, 0);
+    ctx.lineTo(-w * 1.15, -h * 0.3);
+    ctx.lineTo(-w * 1.05,  0);
+    ctx.lineTo(-w * 1.15,  h * 0.3);
+    ctx.closePath();
     ctx.fill();
     ctx.stroke();
-
     ctx.beginPath();
-    ctx.arc(0, -h / 4, w / 4, Math.PI, 0);
+    ctx.moveTo( w * 0.85, 0);
+    ctx.lineTo( w * 1.15, -h * 0.3);
+    ctx.lineTo( w * 1.05,  0);
+    ctx.lineTo( w * 1.15,  h * 0.3);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#ff5a4a';
+    // 2) Anillos decorativos en el borde superior del cuerpo
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth   = 1;
+    for (let i = 0; i < 3; i++) {
+      const ax = -w * 0.5 + (i + 1) * (w * 0.25);
+      ctx.beginPath();
+      ctx.arc(ax, -h * 0.55, h * 0.25, Math.PI, 0);
+      ctx.stroke();
+    }
+
+    // 3) Cuerpo del OVNI
+    ctx.fillStyle   = '#0d0d0d';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth   = 1.5;
     ctx.beginPath();
-    ctx.arc(0, h / 4, h / 3, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, w * 0.5, h * 0.5, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
+
+    // 4) Ventanillas secuenciales (3 luces)
+    const windowColors = ['#7cff7a', '#ffd24b', '#7cdcff'];
+    const litIndex = Math.floor(this.windowPhase) % 3;
+    for (let i = 0; i < 3; i++) {
+      const wx = (i - 1) * r * 0.45;
+      const isLit = i === litIndex;
+      ctx.fillStyle = isLit ? windowColors[i] : '#2a2a2a';
+      ctx.beginPath();
+      ctx.arc(wx, -h * 0.05, r * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+      if (isLit) {
+        ctx.save();
+        ctx.shadowColor = windowColors[i];
+        ctx.shadowBlur  = 8;
+        ctx.beginPath();
+        ctx.arc(wx, -h * 0.05, r * 0.12, 0, Math.PI * 2);
+        ctx.fillStyle = windowColors[i];
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // 5) Propulsor inferior con pulso
+    const pr = r * 0.32;
+    const glow = ctx.createRadialGradient(0, h * 0.55, 0, 0, h * 0.55, pr * 2.5);
+    const hot = Math.round(255 - thrust * 80);
+    glow.addColorStop(0, `rgba(255, ${hot}, 80, ${0.8 * thrust})`);
+    glow.addColorStop(1, 'rgba(255, 80, 60, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, h * 0.55, pr * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgb(255, ${hot}, 80)`;
+    ctx.beginPath();
+    ctx.arc(0, h * 0.55, pr, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 6) Domo (semicírculo arriba) con latido
+    ctx.save();
+    ctx.translate(0, -h * 0.15);
+    ctx.scale(domeScale, domeScale);
+    ctx.fillStyle   = 'rgba(180, 220, 255, 0.18)';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth   = 1.3;
+    ctx.beginPath();
+    ctx.arc(0, 0, domeR, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Rim-light del domo
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth   = 0.8;
+    ctx.beginPath();
+    ctx.arc(0, domeR * 0.2, domeR * 0.85, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
+    ctx.restore();
 
     ctx.restore();
   }
@@ -679,6 +872,7 @@ class Ship {
     this.shieldCharges = 0;   // 0 = sin escudo; >0 = absorbe esa cantidad de impactos
     this.shieldPulse   = 0;   // para animación de la burbuja
     this.hyperspaceCd  = 0;   // segundos restantes antes de poder hiperespaciar
+    this.overdrive     = 0;   // segundos restantes de ráfaga rápida (drop del OVNI)
   }
 
   update(dt) {
@@ -689,6 +883,7 @@ class Ship {
     if (this.tripleShot    > 0) this.tripleShot    -= dt;
     if (this.tripleShotCd  > 0) this.tripleShotCd  -= dt;
     if (this.hyperspaceCd  > 0) this.hyperspaceCd  -= dt;
+    if (this.overdrive     > 0) this.overdrive     -= dt;
     if (this.shieldCharges > 0) this.shieldPulse  += dt;
 
     const ROT    = 3.5;   // rad/s
@@ -712,7 +907,7 @@ class Ship {
 
   tryShoot() {
     if (this.shootCooldown > 0 || this.dead) return [];
-    this.shootCooldown = 0.2;
+    this.shootCooldown = this.overdrive > 0 ? 0.04 : 0.2;
     const NOSE = 21 * (getSkin().scale || 1);
     const ox = this.x + Math.cos(this.angle) * NOSE;
     const oy = this.y + Math.sin(this.angle) * NOSE;
@@ -769,13 +964,40 @@ class Ship {
       }
     }
 
-    // Llama del propulsor
-    if (this.thrusting && Math.random() > 0.35) {
+    // Líneas de panel internas (solo en skins con casco detallado)
+    if (skin.hull.length > 4) {
+      ctx.strokeStyle = skin.stroke;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth   = 0.8;
       ctx.beginPath();
-      ctx.moveTo(-8, -4);
-      ctx.lineTo(-8 - rand(6, 14), 0);
-      ctx.lineTo(-8,  4);
-      ctx.strokeStyle = skin.thrust;
+      ctx.moveTo(-2, -5); ctx.lineTo(8, -5);
+      ctx.moveTo(-2,  5); ctx.lineTo(8,  5);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Llama del propulsor: glow trasero + núcleo blanco + halo naranja
+    if (this.thrusting) {
+      const flicker = rand(6, 14);
+      const tailX   = -8 - flicker;
+
+      // Halo de la llama (ancho, naranja translúcido)
+      ctx.strokeStyle = 'rgba(255, 130, 0, 0.5)';
+      ctx.lineWidth   = 5;
+      ctx.lineCap     = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-8, -5);
+      ctx.lineTo(tailX, 0);
+      ctx.lineTo(-8,  5);
+      ctx.stroke();
+
+      // Núcleo blanco brillante
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth   = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-8, -3);
+      ctx.lineTo(tailX + 2, 0);
+      ctx.lineTo(-8,  3);
       ctx.stroke();
     }
 
@@ -941,6 +1163,158 @@ class ShieldPowerUp {
   }
 }
 
+// ── PowerUp (overdrive · drop del OVNI) ──────────────────────────────────────
+class OverdrivePowerUp {
+  constructor(x, y) {
+    this.x      = x;
+    this.y      = y;
+    this.radius = 10;
+    this.ttl    = POWERUP_TTL;
+    this.dead   = false;
+    this.pulse  = 0;
+  }
+
+  update(dt) {
+    this.ttl -= dt;
+    this.pulse += dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  visible() {
+    return this.ttl > 2 || Math.floor(this.ttl * 8) % 2 === 0;
+  }
+
+  draw() {
+    if (!this.visible()) return;
+
+    const r     = this.radius;
+    const glow  = 0.5 + 0.5 * Math.sin(this.pulse * 6);
+    const scale = 1 + glow * 0.15;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.scale(scale, scale);
+
+    // Halo dorado
+    ctx.fillStyle = `rgba(255, 220, 90, ${(0.12 + glow * 0.14).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dos balas paralelas diagonales
+    ctx.strokeStyle = '#ffd24b';
+    ctx.fillStyle   = 'rgba(255, 210, 75, 0.35)';
+    ctx.lineWidth   = 1.5;
+    ctx.lineCap     = 'round';
+    ctx.lineJoin    = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(-4, -r);
+    ctx.lineTo( r,  r);
+    ctx.moveTo( r, -r);
+    ctx.lineTo(-4,  r);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(-3, 0, 2.2, 0, Math.PI * 2);
+    ctx.arc( 3, 0, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+  }
+}
+
+// ── PowerUp (pulse · onda expansiva · drop del OVNI) ──────────────────────────
+class PulsePowerUp {
+  constructor(x, y) {
+    this.x      = x;
+    this.y      = y;
+    this.radius = 10;
+    this.ttl    = POWERUP_TTL;
+    this.dead   = false;
+    this.pulse  = 0;
+  }
+
+  update(dt) {
+    this.ttl -= dt;
+    this.pulse += dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  visible() {
+    return this.ttl > 2 || Math.floor(this.ttl * 8) % 2 === 0;
+  }
+
+  draw() {
+    if (!this.visible()) return;
+
+    const r     = this.radius;
+    const glow  = 0.5 + 0.5 * Math.sin(this.pulse * 5);
+    const scale = 1 + glow * 0.15;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.scale(scale, scale);
+
+    // Halo cian
+    ctx.fillStyle = `rgba(90, 215, 255, ${(0.12 + glow * 0.14).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tres anillos concéntricos pulsantes
+    ctx.strokeStyle = '#7cdcff';
+    ctx.lineWidth   = 1.5;
+    for (let i = 0; i < 3; i++) {
+      const rr = r * (0.35 + i * 0.28);
+      ctx.globalAlpha = 0.85 - i * 0.22;
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Punto central brillante
+    ctx.fillStyle = '#e0f7ff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+// ── Partícula de onda expansiva (Pulse) ───────────────────────────────────────
+class RingParticle {
+  constructor(x, y, color = '120,220,255') {
+    this.x      = x;
+    this.y      = y;
+    this.radius = 8;
+    this.maxR   = Math.hypot(Math.max(W, H), Math.max(W, H));
+    this.ttl    = 0.6;
+    this.life   = 0.6;
+    this.dead   = false;
+    this.color  = color;
+  }
+
+  update(dt) {
+    this.ttl -= dt;
+    if (this.ttl <= 0) this.dead = true;
+  }
+
+  draw() {
+    const t = 1 - this.ttl / this.life;          // 0..1
+    const r = this.radius + t * (this.maxR - this.radius);
+    const alpha = (1 - t) * 0.85;
+    ctx.strokeStyle = `rgba(${this.color},${alpha.toFixed(3)})`;
+    ctx.lineWidth = 3 * (1 - t * 0.6);
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
 // ── Hiperespacio ───────────────────────────────────────────────────────────────
 const HYPERSPACE_COOLDOWN     = 4;     // segundos entre usos
 const HYPERSPACE_INVULNERABLE = 1.2;   // invencibilidad post-teleporte
@@ -1031,6 +1405,28 @@ function nextLevel() {
 
 function explode(x, y, count = 8, color) {
   for (let i = 0; i < count; i++) particles.push(new Particle(x, y, color));
+}
+
+// Efecto del power-up Pulse: destruye todos los asteroides y empuja los OVNI
+function applyPulse(ship) {
+  particles.push(new RingParticle(ship.x, ship.y, '120,220,255'));
+  let destroyed = 0;
+  for (const a of asteroids) {
+    if (a.dead) continue;
+    a.dead = true;
+    score += (a.star ? STAR_POINTS : POINTS[a.size]) * (getSkin().scoreMultiplier || 1);
+    explode(a.x, a.y, a.size * 4);
+    destroyed++;
+  }
+  for (const u of ufos) {
+    if (u.dead) continue;
+    u.vx = -u.vx;
+    u.vy = -u.vy;
+    u.fireTimer = 0;       // dispara de inmediato en dirección contraria
+    u.x = wrap(u.x + u.vx * 0.05, W);
+    u.y = wrap(u.y + u.vy * 0.05, H);
+  }
+  sfx.explode(2);
 }
 
 function killShip() {
@@ -1242,9 +1638,10 @@ function updateSim(dt) {
       if (!u.dead && !b.dead && dist(b, u) < u.radius) {
         b.dead = true;
         u.dead = true;
-        score += UFO_POINTS * (getSkin().scoreMultiplier || 1);
+        score += u.points * (getSkin().scoreMultiplier || 1);
         explode(u.x, u.y, 12);
         sfx.ufoDie();
+        u.onDestroyed();
       }
     }
   }
@@ -1265,6 +1662,14 @@ function updateSim(dt) {
         ship.shieldCharges = SHIELD_CHARGES;
         explode(p.x, p.y, 8, '90,215,255');
         sfx.shield();
+      } else if (p instanceof OverdrivePowerUp) {
+        ship.overdrive = OVERDRIVE_DURATION;
+        explode(p.x, p.y, 10, '255,210,75');
+        sfx.overdrive();
+      } else if (p instanceof PulsePowerUp) {
+        applyPulse(ship);
+        explode(p.x, p.y, 14, '120,220,255');
+        sfx.pulse();
       } else {
         ship.speedBoost = SPEED_BOOST_DURATION;
         explode(p.x, p.y, 6);
@@ -1272,7 +1677,7 @@ function updateSim(dt) {
       }
     }
   }
-  powerups = powerups.filter(p => !p.dead);
+  powerups  = powerups.filter(p => !p.dead);
 
   if (ship.shieldCharges > 0 && !ship.dead) {
     const shieldR = ship.radius + 8;
@@ -1326,10 +1731,13 @@ function updateVisuals(dt) {
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
 function drawLifeIcon(x, y) {
+  const skin = getSkin();
+  const skinScale = skin.scale || 1;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(-Math.PI / 2);
-  ctx.strokeStyle = '#fff';
+  ctx.scale(skinScale, skinScale);
+  ctx.strokeStyle = skin.stroke;
   ctx.lineWidth   = 1.2;
   ctx.lineJoin    = 'round';
   ctx.beginPath();
@@ -1399,6 +1807,11 @@ function drawHUD() {
   if (ship.shieldCharges > 0) {
     ctx.fillStyle = '#5ad7ff';
     ctx.fillText(`ESCUDO  x${ship.shieldCharges}`, 14, 110);
+  }
+
+  if (ship.overdrive > 0) {
+    ctx.fillStyle = '#ffd24b';
+    ctx.fillText(`OVERDRIVE  ${ship.overdrive.toFixed(1)}s`, 14, 150);
   }
 
   if (!ship.dead) {
@@ -1523,6 +1936,7 @@ function draw() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
 
+  drawNebula();
   drawStars();
 
   particles.forEach(p => p.draw());
